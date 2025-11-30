@@ -107,7 +107,7 @@
           return;
         }
 
-        console.log('📥 Receiving data from Firebase...');
+        console.log('📥 Real-time update received from Firebase...');
 
         // Update all data from Firebase
         if (data.orders && Array.isArray(data.orders)) {
@@ -149,22 +149,36 @@
           window.nextExtraOptionId = data.nextExtraOptionId;
         }
 
-        // Update UI if render function exists
-        if (typeof window.renderKitchenOrders === 'function') {
-          try {
-            window.renderKitchenOrders();
-            console.log('✅ Kitchen view updated');
-          } catch (e) {
-            console.warn('renderKitchenOrders failed:', e);
+        // Force update the kitchen view if visible
+        const kitchenView = document.getElementById('kitchenView');
+        const ordersTab = document.getElementById('ordersTab');
+        
+        if (kitchenView && !kitchenView.classList.contains('hidden') && 
+            ordersTab && !ordersTab.classList.contains('hidden')) {
+          
+          console.log('🔄 Force updating orders view...');
+          
+          // Update UI if render function exists
+          if (typeof window.renderKitchenOrders === 'function') {
+            try {
+              window.renderKitchenOrders();
+              console.log('✅ Orders view updated in real-time');
+            } catch (e) {
+              console.warn('renderKitchenOrders failed:', e);
+            }
           }
         }
         
         // Update menu if customer view is visible
-        if (typeof window.renderMenu === 'function') {
-          try {
-            window.renderMenu();
-          } catch (e) {
-            console.warn('renderMenu failed:', e);
+        const customerView = document.getElementById('customerView');
+        if (customerView && !customerView.classList.contains('hidden')) {
+          if (typeof window.renderMenu === 'function') {
+            try {
+              window.renderMenu();
+              console.log('✅ Menu updated in real-time');
+            } catch (e) {
+              console.warn('renderMenu failed:', e);
+            }
           }
         }
       });
