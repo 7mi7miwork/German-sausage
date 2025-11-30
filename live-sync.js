@@ -1,231 +1,236 @@
 /**
  * live-sync.js
  *
- * Realtime Firebase listener for orders. When enabled it keeps the kitchen view live:
- *  - Listens to /orders in Realtime Database and updates `window.orders`
- *  - Calls your page render function (if present): renderKitchenOrders() or renderOrders()
- *  - Provides fallback renderer that updates #pendingOrdersGrid and #completedOrdersGrid
- *  - Exposes startOrdersRealtimeListener(), stopOrdersRealtimeListener(), markOrderCompleted()
- *  - Provides enableRealtimeSync() so your existing button onclick="enableRealtimeSync()" works
- *
- * Usage:
- * 1. Place this file next to index.html and load it via <script src="live-sync.js"></script>
- * 2. Click the Enable Real-time Sync button in Settings (or call enableRealtimeSync()).
- *
- * Notes:
- * - This file expects firebase-compat SDK to be loaded (index.html already includes it).
- * - It will initialize firebase automatically if firebaseConfig is present and firebase.apps is empty.
+ * Real-time Firebase listener for orders. Keeps the kitchen view live:
+ *  - Listens to /foodstand in Firebase Realtime Database
+ *  - Updates window.orders automatically
+ *  - Calls renderKitchenOrders() to update the UI
+ *  - Provides markOrderCompleted() for completing orders
  */
 
 (function () {
-  // avoid double initialization
+  // Avoid double initialization
   if (window._ordersRealtimeListenerAttached) return;
 
   function initFirebaseIfNeeded() {
     try {
       if (!window.firebase) {
-        console.warn('Firebase SDK not found on page. Realtime sync unavailable.');
+        console.warn('Firebase SDK not found. Real-time sync unavailable.');
         return false;
       }
+      
       if (!firebase.apps || firebase.apps.length === 0) {
-        if (typeof window.firebaseConfig !== 'undefined' && window.firebaseConfig) {
+        if (window.firebaseConfig && window.firebaseConfig.apiKey && window.firebaseConfig.databaseURL) {
           firebase.initializeApp(window.firebaseConfig);
           window.firebaseDb = firebase.database();
-          console.log('Firebase initialized by live-sync.js');
+          window.firebaseConfig.configured = true;
+          console.log('✅ Firebase initialized by live-sync.js');
           return true;
         } else {
-          console.warn('No firebaseConfig found on page. Cannot initialize Firebase.');
+          console.warn('No firebaseConfig found. Cannot initialize Firebase.');
           return false;
         }
       } else {
         if (!window.firebaseDb && firebase.database) {
           window.firebaseDb = firebase.database();
         }
+        window.firebaseConfig.configured = true;
         return true;
       }
     } catch (err) {
-      console.error('Error initializing Firebase in live-sync.js', err);
+      console.error('Error initializing Firebase:', err);
       return false;
     }
   }
 
-  // simple HTML escaping
-  function escapeHtml(str) {
-    if (typeof str !== 'string') return str;
-    return str.replace(/[&<>"']/g, function (m) {
-      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
-    });
-  }
-
-  // fallback renderer in case your app doesn't expose a render function
-  function renderKitchenOrdersFallback() {
+  // Mark order as completed in Firebase
+  window.markOrderCompleted = function (orderNumber) {
+    if (!orderNumber) return;
+    
     try {
-      const pendingGrid = document.getElementById('pendingOrdersGrid');
-      const completedGrid = document.getElementById('completedOrdersGrid');
-      const emptyPending = document.getElementById('emptyStatePending');
-      const emptyCompleted = document.getElementById('emptyStateCompleted');
-
-      if (!pendingGrid || !completedGrid) return;
-
-      const allOrders = Array.isArray(window.orders) ? window.orders : [];
-
-      const pending = allOrders.filter(o => !(o.completed === true || o.status === 'completed'));
-      const completed = allOrders.filter(o => (o.completed === true || o.status === 'completed'));
-
-      function makeCard(order, isCompleted) {
-        const items = Array.isArray(order.items) ? order.items : (order.items ? Object.values(order.items) : []);
-        const itemsHtml = items.length ? items.map(it => `<div class="order-item">${escapeHtml(it.name || it.title || '')} x ${escapeHtml(String(it.qty || it.quantity || 1))}</div>`).join('') : '<div class="order-item">（無項目）</div>';
-        const orderNumber = escapeHtml(String(order.orderNumber || order.orderNum || order.id || order._id || '—'));
-        const time = (order.createdAt || order.timestamp) ? new Date(order.createdAt || order.timestamp).toLocaleString() : '';
-        const actionHtml = isCompleted ? `<div class="completed-badge">已完成</div>` : `<button class="complete-btn" onclick="markOrderCompleted('${escapeJs(order.id || order.key || '')}')">完成</button>`;
-        return `
-          <div class="order-card ${isCompleted ? 'completed' : ''}" data-order-id="${escapeHtml(order.id || order.key || '')}">
-            <div class="order-card-header">
-              <div>
-                <div class="order-number-display">${orderNumber}</div>
-                <div class="order-time">${escapeHtml(time)}</div>
-              </div>
-              <div style="text-align:right;">
-                ${actionHtml}
-              </div>
-            </div>
-            <div class="order-items">
-              ${itemsHtml}
-            </div>
-          </div>
-        `;
-      }
-
-      pendingGrid.innerHTML = pending.map(o => makeCard(o, false)).join('');
-      completedGrid.innerHTML = completed.map(o => makeCard(o, true)).join('');
-
-      if (emptyPending) emptyPending.style.display = pending.length ? 'none' : 'block';
-      if (emptyCompleted) emptyCompleted.style.display = completed.length ? 'none' : 'block';
-    } catch (err) {
-      console.error('renderKitchenOrdersFallback error', err);
-    }
-  }
-
-  function escapeJs(str) {
-    if (typeof str !== 'string') return str;
-    return str.replace(/['\\]/g, '\\$&');
-  }
-
-  // allow marking an order completed (updates Firebase if connected)
-  window.markOrderCompleted = function (orderKey) {
-    if (!orderKey) return;
-    try {
-      if (window.firebaseDb) {
-        window.firebaseDb.ref('orders/' + orderKey).update({ completed: true, completedAt: Date.now() }).then(() => {
-          console.log('Order marked completed:', orderKey);
-        }).catch(err => {
-          console.error('Failed to mark order completed in Firebase', err);
-        });
-      } else {
-        // fallback to local update and re-render
-        if (Array.isArray(window.orders)) {
-          const idx = window.orders.findIndex(o => (o.id === orderKey || o.key === orderKey));
-          if (idx >= 0) {
-            window.orders[idx].completed = true;
-            if (typeof window.renderKitchenOrders === 'function') window.renderKitchenOrders();
-            else if (typeof window.renderOrders === 'function') window.renderOrders();
-            else renderKitchenOrdersFallback();
-          }
+      // Find order in local array
+      const order = window.orders.find(o => o.orderNumber === orderNumber);
+      if (order) {
+        order.completed = true;
+        
+        // Update Firebase
+        if (window.firebaseDb && window.firebaseConfig.configured) {
+          const data = {
+            menuItems: window.menuItems || [],
+            orders: window.orders || [],
+            orderCounter: window.orderCounter || 0,
+            maxInventory: window.maxInventory || {},
+            currentTheme: window.currentTheme || 'orange',
+            siteName: window.siteName || { chinese: '美食站', english: 'Food Stand', emoji: '🍴' },
+            extraOptions: window.extraOptions || [],
+            nextItemId: window.nextItemId || 5,
+            nextExtraOptionId: window.nextExtraOptionId || 2,
+            lastUpdated: new Date().toISOString()
+          };
+          
+          window.firebaseDb.ref('foodstand').set(data).then(() => {
+            console.log('✅ Order completed and synced to Firebase');
+          }).catch(err => {
+            console.error('❌ Failed to sync to Firebase:', err);
+          });
+        }
+        
+        // Update UI immediately
+        if (typeof window.renderKitchenOrders === 'function') {
+          window.renderKitchenOrders();
         }
       }
     } catch (err) {
-      console.error('markOrderCompleted error', err);
+      console.error('markOrderCompleted error:', err);
     }
   };
 
   function startOrdersRealtimeListener() {
     if (window._ordersRealtimeListenerAttached) {
-      console.log('orders realtime listener already attached');
+      console.log('📡 Orders real-time listener already attached');
       return;
     }
-    if (!initFirebaseIfNeeded()) return;
+    
+    if (!initFirebaseIfNeeded()) {
+      console.log('⚠️ Cannot start real-time sync: Firebase not initialized');
+      return;
+    }
 
     try {
-      const ref = window.firebaseDb.ref('orders');
+      const ref = window.firebaseDb.ref('foodstand');
+      
       ref.on('value', snapshot => {
-        const val = snapshot.val() || {};
-        const arr = Object.keys(val).map(k => {
-          const item = val[k];
-          if (typeof item === 'object' && item !== null) {
-            item.id = k;
-            return item;
-          } else {
-            return { id: k, value: item };
+        const data = snapshot.val();
+        
+        if (!data) {
+          console.log('No data in Firebase yet');
+          return;
+        }
+
+        console.log('📥 Receiving data from Firebase...');
+
+        // Update all data from Firebase
+        if (data.orders && Array.isArray(data.orders)) {
+          window.orders = data.orders;
+        }
+        
+        if (data.orderCounter !== undefined) {
+          window.orderCounter = data.orderCounter;
+        }
+        
+        if (data.menuItems && Array.isArray(data.menuItems)) {
+          window.menuItems = data.menuItems;
+        }
+        
+        if (data.maxInventory) {
+          window.maxInventory = data.maxInventory;
+        }
+        
+        if (data.currentTheme) {
+          window.currentTheme = data.currentTheme;
+        }
+        
+        if (data.siteName) {
+          window.siteName = data.siteName;
+          if (typeof window.updateSiteName === 'function') {
+            window.updateSiteName();
           }
-        });
+        }
+        
+        if (data.extraOptions && Array.isArray(data.extraOptions)) {
+          window.extraOptions = data.extraOptions;
+        }
+        
+        if (data.nextItemId) {
+          window.nextItemId = data.nextItemId;
+        }
+        
+        if (data.nextExtraOptionId) {
+          window.nextExtraOptionId = data.nextExtraOptionId;
+        }
 
-        // sort by createdAt or orderNumber if present
-        arr.sort((a, b) => {
-          const at = a.createdAt || a.timestamp || a.orderNumber || 0;
-          const bt = b.createdAt || b.timestamp || b.orderNumber || 0;
-          return (at - bt);
-        });
-
-        window.orders = arr;
-
-        // Prefer app-provided render functions
+        // Update UI if render function exists
         if (typeof window.renderKitchenOrders === 'function') {
-          try { window.renderKitchenOrders(); return; } catch (e) { console.warn('renderKitchenOrders failed', e); }
+          try {
+            window.renderKitchenOrders();
+            console.log('✅ Kitchen view updated');
+          } catch (e) {
+            console.warn('renderKitchenOrders failed:', e);
+          }
         }
-        if (typeof window.renderOrders === 'function') {
-          try { window.renderOrders(); return; } catch (e) { console.warn('renderOrders failed', e); }
+        
+        // Update menu if customer view is visible
+        if (typeof window.renderMenu === 'function') {
+          try {
+            window.renderMenu();
+          } catch (e) {
+            console.warn('renderMenu failed:', e);
+          }
         }
-
-        // fallback:
-        renderKitchenOrdersFallback();
       });
 
       window._ordersRealtimeListenerAttached = true;
+      
       const syncStatus = document.getElementById('syncStatus');
       if (syncStatus) {
         syncStatus.style.display = 'block';
-        syncStatus.style.color = 'var(--text-dark)';
-        syncStatus.innerText = '🔔 即時訂單同步已啟用 | Realtime orders sync enabled';
+        syncStatus.style.background = 'var(--success)';
+        syncStatus.style.color = 'white';
+        syncStatus.innerText = '🔄 即時訂單同步已啟用 | Real-time orders sync enabled';
+        
+        setTimeout(() => {
+          syncStatus.style.display = 'none';
+        }, 3000);
       }
-      console.log('Started orders realtime listener.');
+      
+      console.log('✅ Real-time sync enabled successfully!');
     } catch (err) {
-      console.error('Failed to attach realtime listener', err);
+      console.error('Failed to attach real-time listener:', err);
     }
   }
 
   function stopOrdersRealtimeListener() {
     try {
       if (!window.firebaseDb) return;
-      const ref = window.firebaseDb.ref('orders');
+      
+      const ref = window.firebaseDb.ref('foodstand');
       ref.off();
       window._ordersRealtimeListenerAttached = false;
+      
       const syncStatus = document.getElementById('syncStatus');
       if (syncStatus) {
         syncStatus.style.display = 'block';
-        syncStatus.style.color = 'var(--text-muted)';
-        syncStatus.innerText = '⛔ 已停止即時同步 | Realtime sync stopped';
+        syncStatus.style.background = 'var(--text-muted)';
+        syncStatus.style.color = 'white';
+        syncStatus.innerText = '⛔ 已停止即時同步 | Real-time sync stopped';
       }
-      console.log('Stopped orders realtime listener.');
+      
+      console.log('⛔ Real-time sync stopped');
     } catch (err) {
-      console.error('stopOrdersRealtimeListener error', err);
+      console.error('stopOrdersRealtimeListener error:', err);
     }
   }
 
-  // expose functions globally
+  // Expose functions globally
   window.startOrdersRealtimeListener = startOrdersRealtimeListener;
   window.stopOrdersRealtimeListener = stopOrdersRealtimeListener;
 
-  // ensure existing button onclick enableRealtimeSync() works
+  // Override enableRealtimeSync to use our listener
   window.enableRealtimeSync = function () {
     startOrdersRealtimeListener();
   };
 
-  // auto-start if firebaseConfig.configured == true
-  if (typeof window.firebaseConfig !== 'undefined' && window.firebaseConfig && window.firebaseConfig.configured) {
+  // Auto-start if firebaseConfig is configured
+  if (window.firebaseConfig && window.firebaseConfig.apiKey && window.firebaseConfig.databaseURL) {
     setTimeout(() => {
-      try { startOrdersRealtimeListener(); } catch (err) { console.warn('Auto-start failed', err); }
-    }, 500);
+      try {
+        console.log('🚀 Auto-starting real-time sync...');
+        startOrdersRealtimeListener();
+      } catch (err) {
+        console.warn('Auto-start failed:', err);
+      }
+    }, 1000);
   }
 
-  window._ordersRealtimeListenerAttached = window._ordersRealtimeListenerAttached || false;
+  window._ordersRealtimeListenerAttached = false;
 })();
