@@ -1053,7 +1053,14 @@
         renderMenu();
         updateCartDisplay();
         updateSiteName();
+        
+        // Auto-initialize Firebase if config is provided
         autoInitializeFirebase();
+        
+        // Log initialization status
+        console.log('🚀 App initialized');
+        console.log('Firebase config:', firebaseConfig);
+        console.log('Orders array:', orders);
 
         // Dark mode detection
         if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -1826,26 +1833,35 @@
         }
 
         function initializeFirebase() {
-            if (firebaseConfig.configured) return;
+            if (firebaseConfig.configured) {
+                console.log('⚠️ Firebase already configured, skipping...');
+                return;
+            }
 
             try {
                 if (!window.firebase) {
-                    console.error('Firebase SDK not loaded');
+                    console.error('❌ Firebase SDK not loaded');
                     return;
                 }
 
+                console.log('🔧 Initializing Firebase...');
                 firebase.initializeApp(firebaseConfig);
                 firebaseDb = firebase.database();
                 firebaseConfig.configured = true;
 
                 console.log('✅ Firebase initialized successfully!');
+                console.log('📡 Database reference:', firebaseDb);
 
+                // Auto-load data on init
                 loadFromFirebase();
+
+                // Enable real-time sync automatically
+                console.log('🔄 Starting real-time sync...');
                 enableRealtimeSync();
 
                 showSyncStatus('✅ Firebase已連接並啟用即時同步 | Firebase connected with real-time sync', 'success');
             } catch (error) {
-                console.error('Firebase init failed:', error);
+                console.error('❌ Firebase init failed:', error);
                 showSyncStatus('Firebase初始化失敗 | Firebase init failed: ' + error.message, 'error');
             }
         }
