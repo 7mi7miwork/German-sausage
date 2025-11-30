@@ -1465,12 +1465,12 @@
             if (order) {
                 order.completed = true;
                 
-                // Update UI immediately
+                // Update UI immediately (local)
                 renderPendingOrders();
                 renderCompletedOrders();
                 renderStatistics();
                 
-                // Then sync to Firebase
+                // Sync to Firebase (will trigger real-time update on other devices)
                 saveToFirebase();
             }
         }
@@ -1478,9 +1478,14 @@
         setInterval(() => {
             const kitchenView = document.getElementById('kitchenView');
             if (!kitchenView.classList.contains('hidden')) {
-                renderKitchenView();
+                // Check which tab is active and only update that tab
+                const ordersTab = document.getElementById('ordersTab');
+                if (!ordersTab.classList.contains('hidden')) {
+                    renderPendingOrders();
+                    renderCompletedOrders();
+                }
             }
-        }, 10000);
+        }, 3000); // Check every 3 seconds for updates
 
         function showKitchenTab(tab) {
             const tabs = ['ordersTab', 'statisticsTab', 'settingsTab'];
