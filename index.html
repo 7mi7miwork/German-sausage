@@ -915,1206 +915,764 @@
         </div>
     </div>
 
+    <!-- App JS: unified, safe initialization -->
     <script>
-        // Menu items data
-        const menuItems = [
-            {
-                id: 1,
-                emoji: '🥘',
-                nameCh: '咖哩香腸餐盒',
-                nameEn: 'Curry Sausage Meal Box',
-                price: 100,
-                canAddDrink: true
-            },
-            {
-                id: 2,
-                emoji: '🌭',
-                nameCh: '美式熱狗堡',
-                nameEn: 'American Hot Dog',
-                price: 75,
-                canAddDrink: true
-            },
-            {
-                id: 3,
-                emoji: '🍎',
-                nameCh: '德國外婆蘋果蛋糕',
-                nameEn: 'German Grandma\'s Apple Cake',
-                price: 85,
-                canAddDrink: true
-            },
-            {
-                id: 4,
-                emoji: '🍊',
-                nameCh: '農莊金桔糖漿氣泡水',
-                nameEn: 'Farm Kumquat Syrup Sparkling Water',
-                price: 35,
-                canAddDrink: false
-            }
-        ];
+    (function () {
+      /* -------------------------
+         Default Data & State
+         ------------------------- */
+      const defaultMenuItems = [
+        { id: 1, emoji: '🥘', nameCh: '咖哩香腸餐盒', nameEn: 'Curry Sausage Meal Box', price: 100, canAddDrink: true },
+        { id: 2, emoji: '🌭', nameCh: '美式熱狗堡', nameEn: 'American Hot Dog', price: 75, canAddDrink: true },
+        { id: 3, emoji: '🍎', nameCh: '德國外婆蘋果蛋糕', nameEn: "German Grandma's Apple Cake", price: 85, canAddDrink: true },
+        { id: 4, emoji: '🍊', nameCh: '農莊金桔糖漿氣泡水', nameEn: 'Farm Kumquat Syrup Sparkling Water', price: 35, canAddDrink: false }
+      ];
 
-        // Cart state (in-memory storage for iframe compatibility)
-        let cart = [];
-        let orderCounter = 0;
-        let orders = [];
-        let isKitchenAuthenticated = false;
-        const KITCHEN_PASSWORD = '1234';
+      // Ensure globals exist or set defaults
+      window.menuItems = window.menuItems || defaultMenuItems.slice();
+      window.cart = window.cart || [];
+      window.orderCounter = window.orderCounter || 0;
+      window.orders = window.orders || [];
+      window.maxInventory = window.maxInventory || { 1:50, 2:50, 3:30, 4:100 };
+      window.currentTheme = window.currentTheme || 'orange';
+      window.siteName = window.siteName || { chinese: '美食站', english: 'Food Stand', emoji: '🍴' };
+      window.extraOptions = window.extraOptions || [{ id:1, nameCh:'加購飲料', nameEn:'Add Drink', price:15 }];
+      window.nextItemId = window.nextItemId || 5;
+      window.nextExtraOptionId = window.nextExtraOptionId || 2;
 
-        // Max inventory settings (configurable)
-        let maxInventory = {
-            1: 50,
-            2: 50,
-            3: 30,
-            4: 100
-        };
+      // Expose firebaseConfig placeholder if not present
+      window.firebaseConfig = window.firebaseConfig || {
+        apiKey: "AIzaSyD7cWCX1_GQ1V0SCWEo5tAtmNWYX4DGwIg",
+        authDomain: "german-sausage.firebaseapp.com",
+        databaseURL: "https://german-sausage-default-rtdb.firebaseio.com",
+        projectId: "german-sausage",
+        storageBucket: "german-sausage.firebasestorage.app",
+        messagingSenderId: "951839734578",
+        appId: "1:951839734578:web:d0a8bf70520460cd97b52b",
+        configured: false
+      };
 
-        // Firebase config
-        let firebaseConfig = {
-            apiKey: "AIzaSyD7cWCX1_GQ1V0SCWEo5tAtmNWYX4DGwIg",
-            authDomain: "german-sausage.firebaseapp.com",
-            databaseURL: "https://german-sausage-default-rtdb.firebaseio.com",
-            projectId: "german-sausage",
-            storageBucket: "german-sausage.firebasestorage.app",
-            messagingSenderId: "951839734578",
-            appId: "1:951839734578:web:d0a8bf70520460cd97b52b",
-            measurementId: "G-V14K88QR24",
-            configured: false
-        };
+      // firebaseDb will be set by initialization
+      window.firebaseDb = window.firebaseDb || null;
 
-        let firebaseDb = null;
+      // Safety flag for realtime
+      window.realtimeSyncEnabled = typeof window.realtimeSyncEnabled === 'boolean' ? window.realtimeSyncEnabled : false;
 
-        // Color themes
-        const colorThemes = {
-            orange: {
-                name: '橙色主題 | Orange',
-                primary: '#FF6B35',
-                secondary: '#F7931E',
-                accent: '#FDC830'
-            },
-            blue: {
-                name: '藍色主題 | Blue',
-                primary: '#3B82F6',
-                secondary: '#60A5FA',
-                accent: '#93C5FD'
-            },
-            green: {
-                name: '綠色主題 | Green',
-                primary: '#10B981',
-                secondary: '#34D399',
-                accent: '#6EE7B7'
-            },
-            purple: {
-                name: '紫色主題 | Purple',
-                primary: '#8B5CF6',
-                secondary: '#A78BFA',
-                accent: '#C4B5FD'
-            },
-            red: {
-                name: '紅色主題 | Red',
-                primary: '#EF4444',
-                secondary: '#F87171',
-                accent: '#FCA5A5'
-            }
-        };
+      // Kitchen auth
+      window.KITCHEN_PASSWORD = window.KITCHEN_PASSWORD || '1234';
+      window.isKitchenAuthenticated = window.isKitchenAuthenticated || false;
 
-        let currentTheme = 'orange';
+      /* -------------------------
+         Utility helpers
+         ------------------------- */
+      function el(id) { return document.getElementById(id); }
+      function safeText(n) { return n === undefined || n === null ? '' : n; }
+      function formatTime(iso) {
+        try {
+          return new Date(iso).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return iso || ''; }
+      }
 
-        // Site name settings
-        let siteName = {
-            chinese: '美食站',
-            english: 'Food Stand',
-            emoji: '🍴'
-        };
+      /* -------------------------
+         Basic UI helpers (popups/status)
+         ------------------------- */
+      window.showSyncStatus = function (message, type = 'success') {
+        const statusDiv = el('syncStatus');
+        if (!statusDiv) { console.log(message); return; }
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = type === 'success' ? 'var(--success)' : 'var(--danger)';
+        statusDiv.style.color = 'white';
+        statusDiv.textContent = message;
+        clearTimeout(window.__syncStatusTimer);
+        window.__syncStatusTimer = setTimeout(() => { statusDiv.style.display = 'none'; }, 3000);
+      };
 
-        // Extra options (like add drink)
-        let extraOptions = [
-            {
-                id: 1,
-                nameCh: '加購飲料',
-                nameEn: 'Add Drink',
-                price: 15
-            }
-        ];
+      window._showConfirmDialogFallback = function (message, onConfirm) {
+        const modal = document.createElement('div');
+        modal.className = 'modal show';
+        modal.style.zIndex = 3000;
+        modal.innerHTML = `
+          <div class="modal-content" style="max-width:520px;">
+            <p style="font-size:1.05em;margin-bottom:20px;">${message}</p>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button class="modal-close" id="__confirm_cancel" style="background:var(--text-muted)">取消</button>
+              <button class="modal-close" id="__confirm_ok">確認</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('#__confirm_cancel').onclick = () => modal.remove();
+        modal.querySelector('#__confirm_ok').onclick = () => { modal.remove(); onConfirm && onConfirm(); };
+      };
 
-        let nextItemId = 5;
-        let nextExtraOptionId = 2;
-        let realtimeSyncEnabled = false;
+      window.showConfirmDialog = function(message, onConfirm) {
+        // Use fallback modal
+        window._showConfirmDialogFallback(message, onConfirm);
+      };
 
-        // Expose firebaseConfig globally for live-sync.js
-        window.firebaseConfig = firebaseConfig;
-        window.orders = orders;
-
-        // Expose render functions for live-sync.js
-        window.renderKitchenOrders = function() {
-            renderPendingOrders();
-            renderCompletedOrders();
-            renderStatistics();
-        };
-
-        // Initialize
-        renderMenu();
-        updateCartDisplay();
-        updateSiteName();
-        
-        // Auto-initialize Firebase if config is provided
-        autoInitializeFirebase();
-        
-        // Log initialization status
-        console.log('🚀 App initialized');
-        console.log('Firebase config:', firebaseConfig);
-        console.log('Orders array:', orders);
-
-        // Dark mode detection
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.classList.add('dark');
+      /* -------------------------
+         Firebase safe init wrapper
+         ------------------------- */
+      window.initializeFirebaseSafe = function () {
+        try {
+          if (window.firebaseConfig && window.firebaseConfig.configured && window.firebaseDb) {
+            console.log('⚠️ Firebase already configured (safe).');
+            return true;
+          }
+          if (!window.firebase) { console.warn('Firebase SDK not loaded'); return false; }
+          if (!window.firebaseConfig || !window.firebaseConfig.apiKey || !window.firebaseConfig.databaseURL) {
+            console.warn('No firebaseConfig present or incomplete; skipping init');
+            return false;
+          }
+          firebase.initializeApp(window.firebaseConfig);
+          window.firebaseDb = firebase.database();
+          window.firebaseConfig.configured = true;
+          console.log('✅ Firebase initialized (safe).');
+          return true;
+        } catch (err) {
+          console.error('Firebase init error (safe):', err);
+          return false;
         }
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
-            if (event.matches) {
-                document.documentElement.classList.add('dark');
-            } else {
-                document.documentElement.classList.remove('dark');
-            }
+      };
+
+      /* -------------------------
+         Core App functions (rendering)
+         ------------------------- */
+      window.renderMenu = function () {
+        const menuGrid = el('menuGrid');
+        if (!menuGrid) return;
+        menuGrid.innerHTML = window.menuItems.map(item => `
+          <div class="menu-item">
+            <div class="item-header">
+              <div class="item-emoji">${item.emoji}</div>
+              <div class="item-info">
+                <h3>${item.nameCh}</h3>
+                <div class="english">${item.nameEn}</div>
+              </div>
+            </div>
+            <div class="item-price">${item.price} NTD</div>
+            ${item.canAddDrink ? `
+              <div class="add-drink-option">
+                <input type="checkbox" id="drink-${item.id}" onchange="updateItemTotal && updateItemTotal(${item.id})">
+                <label for="drink-${item.id}">
+                  加購飲料 +15 NTD<br>
+                  <span style="font-size:0.9em;color:var(--text-muted);">Add Drink +15 NTD</span>
+                </label>
+              </div>
+            ` : ''}
+            <div class="quantity-control">
+              <button class="qty-btn" onclick="changeQuantity(${item.id}, -1)">-</button>
+              <div class="qty-display" id="qty-${item.id}">0</div>
+              <button class="qty-btn" onclick="changeQuantity(${item.id}, 1)">+</button>
+            </div>
+            <button class="add-to-cart" onclick="addToCart(${item.id})">加入購物車 | Add to Cart</button>
+          </div>
+        `).join('');
+      };
+
+      window.updateCartDisplay = function () {
+        const cartSummary = el('cartSummary');
+        const cartItems = el('cartItems');
+        const cartTotal = el('cartTotal');
+        if (!cartSummary || !cartItems || !cartTotal) return;
+
+        if (!window.cart || window.cart.length === 0) {
+          cartSummary.style.display = 'none';
+          cartItems.innerHTML = '';
+          cartTotal.textContent = '0';
+          return;
+        }
+
+        cartSummary.style.display = 'block';
+        cartItems.innerHTML = window.cart.map(it => `
+          <div class="cart-item">
+            ${it.emoji} ${it.nameCh} x${it.quantity}
+            ${it.addDrink ? '<br>　　+ 飲料 (Drink)' : ''}
+            <br>　　${it.totalPrice} NTD
+          </div>
+        `).join('');
+
+        const total = window.cart.reduce((s, i) => s + (i.totalPrice || 0), 0);
+        cartTotal.textContent = total;
+      };
+
+      window.changeQuantity = function (itemId, delta) {
+        const qtyEl = el(`qty-${itemId}`);
+        if (!qtyEl) return;
+        let current = parseInt(qtyEl.textContent || '0', 10);
+        current = Math.max(0, current + delta);
+        qtyEl.textContent = current;
+        if (window.updateItemTotal) try { window.updateItemTotal(itemId); } catch (e) {}
+      };
+
+      window.addToCart = function (itemId) {
+        const item = window.menuItems.find(i => i.id === itemId);
+        if (!item) return;
+        const qtyEl = el(`qty-${itemId}`);
+        const qty = qtyEl ? parseInt(qtyEl.textContent || '0', 10) : 0;
+        if (qty <= 0) return;
+        const addDrink = item.canAddDrink && el(`drink-${itemId}`) ? el(`drink-${itemId}`).checked : false;
+        const totalPrice = (item.price + (addDrink ? 15 : 0)) * qty;
+        window.cart.push({ id: item.id, emoji: item.emoji, nameCh: item.nameCh, nameEn: item.nameEn, quantity: qty, addDrink, totalPrice });
+        if (qtyEl) qtyEl.textContent = '0';
+        if (item.canAddDrink && el(`drink-${itemId}`)) el(`drink-${itemId`).checked = false;
+        window.updateCartDisplay();
+      };
+
+      window.submitOrder = function () {
+        if (!window.cart || window.cart.length === 0) return;
+        window.orderCounter = (window.orderCounter || 0) + 1;
+        const order = {
+          orderNumber: window.orderCounter,
+          items: JSON.parse(JSON.stringify(window.cart)),
+          total: window.cart.reduce((s,i)=>s+(i.totalPrice||0),0),
+          timestamp: new Date().toISOString(),
+          completed: false
+        };
+        window.orders.unshift(order);
+        window.saveToFirebase && window.saveToFirebase();
+        const modalOrderNumber = el('modalOrderNumber');
+        if (modalOrderNumber) modalOrderNumber.textContent = window.orderCounter;
+        const orderModal = el('orderModal');
+        if (orderModal) orderModal.classList.add('show');
+        window.cart = [];
+        window.updateCartDisplay();
+        window.renderPendingOrders && window.renderPendingOrders();
+        window.renderStatistics && window.renderStatistics();
+      };
+
+      window.closeModal = function () {
+        const orderModal = el('orderModal');
+        if (orderModal) orderModal.classList.remove('show');
+      };
+
+      /* -------------------------
+         Kitchen & Admin Renderers
+         ------------------------- */
+      function calculateItemStats() {
+        const stats = {};
+        window.menuItems.forEach(m => stats[m.id] = 0);
+        window.orders.forEach(o => (o.items || []).forEach(i => { stats[i.id] = (stats[i.id]||0) + (i.quantity||0); }));
+        return stats;
+      }
+
+      window.renderStatistics = function () {
+        const statsGrid = el('statisticsGrid');
+        if (!statsGrid) return;
+        const stats = calculateItemStats();
+        statsGrid.innerHTML = window.menuItems.map(item => {
+          const sold = stats[item.id] || 0;
+          const max = window.maxInventory[item.id] || 0;
+          const percentage = max > 0 ? (sold / max) * 100 : 0;
+          let progressClass = '';
+          if (percentage >= 90) progressClass = 'danger';
+          else if (percentage >= 70) progressClass = 'warning';
+          return `
+            <div class="stat-card">
+              <div class="stat-header">
+                <div class="stat-emoji">${item.emoji}</div>
+                <div>
+                  <div class="stat-name">${item.nameCh}</div>
+                  <div style="font-size: 0.85em; color: var(--text-muted);">${item.nameEn}</div>
+                </div>
+              </div>
+              <div class="stat-numbers">
+                <div class="stat-count">
+                  <div class="stat-label">已售出 | Sold</div>
+                  <div class="stat-value">${sold}</div>
+                </div>
+                <div style="font-size: 1.5em; color: var(--text-muted);">/</div>
+                <div class="stat-count">
+                  <div class="stat-label">最大量 | Max</div>
+                  <div class="stat-max">${max}</div>
+                </div>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill ${progressClass}" style="width: ${Math.min(percentage,100)}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      };
+
+      window.renderSettings = function () {
+        const settingsGrid = el('settingsGrid');
+        if (!settingsGrid) return;
+        settingsGrid.innerHTML = window.menuItems.map(item => `
+          <div class="settings-card">
+            <div class="stat-header">
+              <div class="stat-emoji">${item.emoji}</div>
+              <div>
+                <div class="stat-name">${item.nameCh}</div>
+                <div style="font-size:0.85em;color:var(--text-muted);">${item.nameEn}</div>
+              </div>
+            </div>
+            <label style="font-size:0.9em;color:var(--text-muted);">最大庫存量 | Max Inventory</label>
+            <input type="number" class="settings-input" value="${window.maxInventory[item.id]||0}" onchange="updateMaxInventory(${item.id}, this.value)" min="0">
+          </div>
+        `).join('');
+      };
+
+      window.updateMaxInventory = function (itemId, value) {
+        window.maxInventory[itemId] = parseInt(value || '0', 10) || 0;
+        window.renderStatistics && window.renderStatistics();
+        window.saveToFirebase && window.saveToFirebase();
+      };
+
+      window.renderPendingOrders = function () {
+        const pendingGrid = el('pendingOrdersGrid');
+        const emptyState = el('emptyStatePending');
+        if (!pendingGrid || !emptyState) return;
+        const pending = window.orders.filter(o => !o.completed);
+        if (pending.length === 0) {
+          pendingGrid.innerHTML = '';
+          emptyState.style.display = 'block';
+          return;
+        }
+        emptyState.style.display = 'none';
+        pendingGrid.innerHTML = pending.map(order => `
+          <div class="order-card">
+            <div class="order-card-header">
+              <div class="order-number-display">#${order.orderNumber}</div>
+              <div class="order-time">${formatTime(order.timestamp)}</div>
+            </div>
+            <div class="order-items">
+              ${(order.items || []).map(i => `<div class="order-item">${i.emoji} ${i.nameCh} x${i.quantity}${i.addDrink?'<br>　　+ 飲料 (Drink)':''}</div>`).join('')}
+            </div>
+            <div class="cart-total" style="font-size:1.3em;">總計 Total: ${order.total} NTD</div>
+            <button class="complete-btn" onclick="completeOrder(${order.orderNumber})">✅ 完成訂單 | Complete Order</button>
+          </div>
+        `).join('');
+      };
+
+      window.renderCompletedOrders = function () {
+        const completedGrid = el('completedOrdersGrid');
+        const emptyState = el('emptyStateCompleted');
+        if (!completedGrid || !emptyState) return;
+        const completed = window.orders.filter(o => o.completed);
+        if (completed.length === 0) {
+          completedGrid.innerHTML = '';
+          emptyState.style.display = 'block';
+          return;
+        }
+        emptyState.style.display = 'none';
+        completedGrid.innerHTML = completed.map(order => `
+          <div class="order-card completed">
+            <div class="order-card-header">
+              <div class="order-number-display">#${order.orderNumber}</div>
+              <div class="order-time">${formatTime(order.timestamp)}</div>
+            </div>
+            <div class="order-items">
+              ${(order.items || []).map(i => `<div class="order-item">${i.emoji} ${i.nameCh} x${i.quantity}${i.addDrink?'<br>　　+ 飲料 (Drink)':''}</div>`).join('')}
+            </div>
+            <div class="cart-total" style="font-size:1.3em;">總計 Total: ${order.total} NTD</div>
+            <div class="completed-badge">✅ 已完成 Completed</div>
+          </div>
+        `).join('');
+      };
+
+      window.completeOrder = function (orderNumber) {
+        const ord = window.orders.find(o=>o.orderNumber===orderNumber);
+        if (!ord) return;
+        ord.completed = true;
+        window.renderPendingOrders && window.renderPendingOrders();
+        window.renderCompletedOrders && window.renderCompletedOrders();
+        window.renderStatistics && window.renderStatistics();
+        window.saveToFirebase && window.saveToFirebase();
+      };
+
+      /* -------------------------
+         Menu management (admin)
+         ------------------------- */
+      window.renderMenuManagement = function () {
+        const grid = el('menuManagementGrid');
+        if (!grid) return;
+        grid.innerHTML = window.menuItems.map(item => `
+          <div class="settings-card">
+            <div class="stat-header">
+              <div class="stat-emoji">${item.emoji}</div>
+              <div>
+                <div class="stat-name">${item.nameCh}</div>
+                <div style="font-size:0.85em;color:var(--text-muted);">${item.nameEn}</div>
+              </div>
+            </div>
+            <div style="margin-top:15px;">
+              <div style="font-size:1.3em;color:var(--secondary);font-weight:700;">${item.price} NTD</div>
+            </div>
+            <div style="margin-top:15px;display:flex;gap:10px;">
+              <button class="complete-btn" onclick="editItem(${item.id})" style="flex:1;background:var(--secondary)">✏️ 編輯</button>
+              <button class="complete-btn" onclick="deleteItem(${item.id})" style="flex:1;background:var(--danger)">🗑️ 刪除</button>
+            </div>
+          </div>
+        `).join('');
+      };
+
+      window.showAddItemModal = function () {
+        if (el('itemModalTitle')) el('itemModalTitle').textContent = '➕ 新增菜單項目 | Add Menu Item';
+        if (el('editItemId')) el('editItemId').value = '';
+        if (el('itemEmoji')) el('itemEmoji').value = '';
+        if (el('itemNameCh')) el('itemNameCh').value = '';
+        if (el('itemNameEn')) el('itemNameEn').value = '';
+        if (el('itemPrice')) el('itemPrice').value = '';
+        if (el('itemMaxInventory')) el('itemMaxInventory').value = '50';
+        if (el('itemModal')) el('itemModal').classList.add('show');
+      };
+
+      window.editItem = function (itemId) {
+        const item = window.menuItems.find(i=>i.id===itemId);
+        if (!item) return;
+        if (el('itemModalTitle')) el('itemModalTitle').textContent = '✏️ 編輯菜單項目 | Edit Menu Item';
+        if (el('editItemId')) el('editItemId').value = item.id;
+        if (el('itemEmoji')) el('itemEmoji').value = item.emoji;
+        if (el('itemNameCh')) el('itemNameCh').value = item.nameCh;
+        if (el('itemNameEn')) el('itemNameEn').value = item.nameEn;
+        if (el('itemPrice')) el('itemPrice').value = item.price;
+        if (el('itemMaxInventory')) el('itemMaxInventory').value = (window.maxInventory[item.id]||50);
+        if (el('itemModal')) el('itemModal').classList.add('show');
+      };
+
+      window.saveItem = function () {
+        const editId = el('editItemId') ? el('editItemId').value : '';
+        const emoji = el('itemEmoji') ? (el('itemEmoji').value || '').trim() : '';
+        const nameCh = el('itemNameCh') ? (el('itemNameCh').value || '').trim() : '';
+        const nameEn = el('itemNameEn') ? (el('itemNameEn').value || '').trim() : '';
+        const price = el('itemPrice') ? parseInt(el('itemPrice').value || '0',10) : 0;
+        const maxInv = el('itemMaxInventory') ? parseInt(el('itemMaxInventory').value || '50',10) : 50;
+        if (!emoji || !nameCh || !nameEn || price <= 0) { window.showSyncStatus && window.showSyncStatus('請填寫所有欄位 | Please fill all fields','error'); return; }
+        if (editId) {
+          const it = window.menuItems.find(i=>i.id===parseInt(editId,10));
+          if (it) { it.emoji=emoji; it.nameCh=nameCh; it.nameEn=nameEn; it.price=price; window.maxInventory[it.id]=maxInv; }
+        } else {
+          const newItem = { id: window.nextItemId++, emoji, nameCh, nameEn, price, canAddDrink:true };
+          window.menuItems.push(newItem);
+          window.maxInventory[newItem.id] = maxInv;
+        }
+        if (el('itemModal')) el('itemModal').classList.remove('show');
+        window.renderMenu(); window.renderMenuManagement(); window.renderSettings(); window.renderStatistics(); window.saveToFirebase && window.saveToFirebase();
+      };
+
+      window.deleteItem = function(itemId) {
+        window.showConfirmDialog('確定要刪除此項目嗎？| Are you sure you want to delete this item?', () => {
+          const idx = window.menuItems.findIndex(i=>i.id===itemId);
+          if (idx!==-1) { window.menuItems.splice(idx,1); delete window.maxInventory[itemId]; window.renderMenu(); window.renderMenuManagement(); window.renderStatistics(); window.saveToFirebase && window.saveToFirebase(); }
         });
+      };
 
-        // Site name functions
-        function updateSiteName() {
-            const header = document.querySelector('.header h1');
-            if (header) {
-                header.innerHTML = `${siteName.emoji} ${siteName.chinese} ${siteName.english}`;
-            }
-        }
+      /* -------------------------
+         Extra options management
+         ------------------------- */
+      window.renderExtraOptionsManagement = function () {
+        const grid = el('extraOptionsGrid');
+        if (!grid) return;
+        grid.innerHTML = window.extraOptions.map(opt => `
+          <div class="settings-card">
+            <div>
+              <div class="stat-name">${opt.nameCh}</div>
+              <div style="font-size:0.85em;color:var(--text-muted);">${opt.nameEn}</div>
+            </div>
+            <div style="margin-top:15px;">
+              <div style="font-size:1.3em;color:var(--secondary);font-weight:700;">+${opt.price} NTD</div>
+            </div>
+            <div style="margin-top:15px;display:flex;gap:10px;">
+              <button class="complete-btn" onclick="editExtraOption(${opt.id})" style="flex:1;background:var(--secondary)">✏️ 編輯</button>
+              <button class="complete-btn" onclick="deleteExtraOption(${opt.id})" style="flex:1;background:var(--danger)">🗑️ 刪除</button>
+            </div>
+          </div>
+        `).join('');
+      };
 
-        function saveSiteName() {
-            siteName.emoji = document.getElementById('siteEmoji').value.trim() || '🍴';
-            siteName.chinese = document.getElementById('siteNameCh').value.trim() || '美食站';
-            siteName.english = document.getElementById('siteNameEn').value.trim() || 'Food Stand';
-            
-            updateSiteName();
-            saveToFirebase();
-            showSyncStatus('✅ 站點名稱已更新 | Site name updated', 'success');
-        }
+      window.showAddExtraOptionModal = function () {
+        if (el('extraOptionModalTitle')) el('extraOptionModalTitle').textContent = '➕ 新增額外選項 | Add Extra Option';
+        if (el('editExtraOptionId')) el('editExtraOptionId').value = '';
+        if (el('extraOptionNameCh')) el('extraOptionNameCh').value = '';
+        if (el('extraOptionNameEn')) el('extraOptionNameEn').value = '';
+        if (el('extraOptionPrice')) el('extraOptionPrice').value = '';
+        if (el('extraOptionModal')) el('extraOptionModal').classList.add('show');
+      };
 
-        function loadSiteNameToSettings() {
-            if (document.getElementById('siteEmoji')) {
-                document.getElementById('siteEmoji').value = siteName.emoji;
-                document.getElementById('siteNameCh').value = siteName.chinese;
-                document.getElementById('siteNameEn').value = siteName.english;
-            }
-        }
+      window.editExtraOption = function (id) {
+        const o = window.extraOptions.find(x=>x.id===id);
+        if (!o) return;
+        if (el('extraOptionModalTitle')) el('extraOptionModalTitle').textContent='✏️ 編輯額外選項 | Edit Extra Option';
+        if (el('editExtraOptionId')) el('editExtraOptionId').value = o.id;
+        if (el('extraOptionNameCh')) el('extraOptionNameCh').value = o.nameCh;
+        if (el('extraOptionNameEn')) el('extraOptionNameEn').value = o.nameEn;
+        if (el('extraOptionPrice')) el('extraOptionPrice').value = o.price;
+        if (el('extraOptionModal')) el('extraOptionModal').classList.add('show');
+      };
 
-        function renderMenu() {
-            const menuGrid = document.getElementById('menuGrid');
-            menuGrid.innerHTML = menuItems.map(item => `
-                <div class="menu-item">
-                    <div class="item-header">
-                        <div class="item-emoji">${item.emoji}</div>
-                        <div class="item-info">
-                            <h3>${item.nameCh}</h3>
-                            <div class="english">${item.nameEn}</div>
-                        </div>
-                    </div>
-                    <div class="item-price">${item.price} NTD</div>
+      window.saveExtraOption = function () {
+        const editId = el('editExtraOptionId') ? el('editExtraOptionId').value : '';
+        const nameCh = el('extraOptionNameCh') ? (el('extraOptionNameCh').value||'').trim() : '';
+        const nameEn = el('extraOptionNameEn') ? (el('extraOptionNameEn').value||'').trim() : '';
+        const price = el('extraOptionPrice') ? parseInt(el('extraOptionPrice').value||'0',10):0;
+        if (!nameCh || !nameEn || price<=0) { window.showSyncStatus && window.showSyncStatus('請填寫所有欄位 | Please fill all fields','error'); return; }
+        if (editId) {
+          const op = window.extraOptions.find(o=>o.id===parseInt(editId,10));
+          if (op) { op.nameCh=nameCh; op.nameEn=nameEn; op.price=price; }
+        } else { window.extraOptions.push({ id: window.nextExtraOptionId++, nameCh, nameEn, price }); }
+        if (el('extraOptionModal')) el('extraOptionModal').classList.remove('show');
+        window.renderExtraOptionsManagement(); window.saveToFirebase && window.saveToFirebase();
+      };
 
-                    ${item.canAddDrink ? `
-                        <div class="add-drink-option">
-                            <input type="checkbox" id="drink-${item.id}" onchange="updateItemTotal(${item.id})">
-                            <label for="drink-${item.id}">
-                                加購飲料 +15 NTD<br>
-                                <span style="font-size: 0.9em; color: var(--text-muted);">Add Drink +15 NTD</span>
-                            </label>
-                        </div>
-                    ` : ''}
-
-                    <div class="quantity-control">
-                        <button class="qty-btn" onclick="changeQuantity(${item.id}, -1)">-</button>
-                        <div class="qty-display" id="qty-${item.id}">0</div>
-                        <button class="qty-btn" onclick="changeQuantity(${item.id}, 1)">+</button>
-                    </div>
-
-                    <button class="add-to-cart" onclick="addToCart(${item.id})">
-                        加入購物車 | Add to Cart
-                    </button>
-                </div>
-            `).join('');
-        }
-
-        function changeQuantity(itemId, delta) {
-            const qtyDisplay = document.getElementById(`qty-${itemId}`);
-            let current = parseInt(qtyDisplay.textContent);
-            current = Math.max(0, current + delta);
-            qtyDisplay.textContent = current;
-            updateItemTotal(itemId);
-        }
-
-        function updateItemTotal(itemId) {
-            // This could be extended to show live total per item
-        }
-
-        function addToCart(itemId) {
-            const item = menuItems.find(i => i.id === itemId);
-            const qty = parseInt(document.getElementById(`qty-${itemId}`).textContent);
-
-            if (qty === 0) return;
-
-            const addDrink = item.canAddDrink ? document.getElementById(`drink-${itemId}`).checked : false;
-            const totalPrice = (item.price + (addDrink ? 15 : 0)) * qty;
-
-            cart.push({
-                ...item,
-                quantity: qty,
-                addDrink: addDrink,
-                totalPrice: totalPrice
-            });
-
-            // Reset quantity
-            document.getElementById(`qty-${itemId}`).textContent = '0';
-            if (item.canAddDrink) {
-                document.getElementById(`drink-${itemId}`).checked = false;
-            }
-
-            updateCartDisplay();
-        }
-
-        function updateCartDisplay() {
-            const cartSummary = document.getElementById('cartSummary');
-            const cartItems = document.getElementById('cartItems');
-            const cartTotal = document.getElementById('cartTotal');
-
-            if (cart.length === 0) {
-                cartSummary.style.display = 'none';
-                return;
-            }
-
-            cartSummary.style.display = 'block';
-
-            cartItems.innerHTML = cart.map((item, index) => `
-                <div class="cart-item">
-                    ${item.emoji} ${item.nameCh} x${item.quantity}
-                    ${item.addDrink ? '<br>　　+ 飲料 (Drink)' : ''}
-                    <br>
-                    　　${item.totalPrice} NTD
-                </div>
-            `).join('');
-
-            const total = cart.reduce((sum, item) => sum + item.totalPrice, 0);
-            cartTotal.textContent = total;
-        }
-
-        function submitOrder() {
-            if (cart.length === 0) return;
-
-            orderCounter++;
-            const order = {
-                orderNumber: orderCounter,
-                items: [...cart],
-                total: cart.reduce((sum, item) => sum + item.totalPrice, 0),
-                timestamp: new Date().toISOString(),
-                completed: false
-            };
-
-            orders.unshift(order);
-            saveToFirebase();
-
-            document.getElementById('modalOrderNumber').textContent = orderCounter;
-            document.getElementById('orderModal').classList.add('show');
-
-            cart = [];
-            updateCartDisplay();
-        }
-
-        function closeModal() {
-            document.getElementById('orderModal').classList.remove('show');
-        }
-
-        function switchView(view) {
-            const customerView = document.getElementById('customerView');
-            const kitchenView = document.getElementById('kitchenView');
-            const buttons = document.querySelectorAll('.toggle-btn');
-
-            if (view === 'customer') {
-                customerView.classList.remove('hidden');
-                kitchenView.classList.add('hidden');
-                buttons[0].classList.add('active');
-                buttons[1].classList.remove('active');
-            } else {
-                if (!isKitchenAuthenticated) {
-                    document.getElementById('passwordModal').classList.add('show');
-                    document.getElementById('passwordInput').value = '';
-                    document.getElementById('passwordError').style.display = 'none';
-                    return;
-                }
-
-                customerView.classList.add('hidden');
-                kitchenView.classList.remove('hidden');
-                buttons[0].classList.remove('active');
-                buttons[1].classList.add('active');
-                renderKitchenView();
-            }
-        }
-
-        function verifyPassword() {
-            const input = document.getElementById('passwordInput');
-            const error = document.getElementById('passwordError');
-
-            if (input.value === KITCHEN_PASSWORD) {
-                isKitchenAuthenticated = true;
-                closePasswordModal();
-                switchView('kitchen');
-            } else {
-                error.style.display = 'block';
-                input.value = '';
-                input.focus();
-            }
-        }
-
-        function closePasswordModal() {
-            document.getElementById('passwordModal').classList.remove('show');
-            if (!isKitchenAuthenticated) {
-                const buttons = document.querySelectorAll('.toggle-btn');
-                buttons[0].classList.add('active');
-                buttons[1].classList.remove('active');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const passwordInput = document.getElementById('passwordInput');
-            if (passwordInput) {
-                passwordInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        verifyPassword();
-                    }
-                });
-            }
+      window.deleteExtraOption = function (id) {
+        window.showConfirmDialog('確定要刪除此選項嗎？| Are you sure you want to delete this option?', () => {
+          const idx = window.extraOptions.findIndex(o=>o.id===id);
+          if (idx!==-1) { window.extraOptions.splice(idx,1); window.renderExtraOptionsManagement(); window.saveToFirebase && window.saveToFirebase(); }
         });
+      };
 
-        function renderKitchenView() {
-            renderStatistics();
-            renderSettings();
-            renderPendingOrders();
-            renderCompletedOrders();
+      /* -------------------------
+         Site name & theme
+         ------------------------- */
+      window.updateSiteName = function () {
+        const header = document.querySelector('.header h1');
+        if (header) header.innerHTML = `${window.siteName.emoji} ${window.siteName.chinese} ${window.siteName.english}`;
+      };
+
+      window.saveSiteName = function () {
+        if (el('siteEmoji')) window.siteName.emoji = el('siteEmoji').value.trim() || window.siteName.emoji || '🍴';
+        if (el('siteNameCh')) window.siteName.chinese = el('siteNameCh').value.trim() || window.siteName.chinese || '美食站';
+        if (el('siteNameEn')) window.siteName.english = el('siteNameEn').value.trim() || window.siteName.english || 'Food Stand';
+        window.updateSiteName();
+        window.saveToFirebase && window.saveToFirebase();
+        window.showSyncStatus && window.showSyncStatus('✅ 站點名稱已更新 | Site name updated','success');
+      };
+
+      window.loadSiteNameToSettings = function () {
+        if (el('siteEmoji')) el('siteEmoji').value = window.siteName.emoji || '';
+        if (el('siteNameCh')) el('siteNameCh').value = window.siteName.chinese || '';
+        if (el('siteNameEn')) el('siteNameEn').value = window.siteName.english || '';
+      };
+
+      const colorThemes = {
+        orange: { name:'橙色主題 | Orange', primary:'#FF6B35', secondary:'#F7931E', accent:'#FDC830' },
+        blue: { name:'藍色主題 | Blue', primary:'#3B82F6', secondary:'#60A5FA', accent:'#93C5FD' },
+        green: { name:'綠色主題 | Green', primary:'#10B981', secondary:'#34D399', accent:'#6EE7B7' },
+        purple: { name:'紫色主題 | Purple', primary:'#8B5CF6', secondary:'#A78BFA', accent:'#C4B5FD' },
+        red: { name:'紅色主題 | Red', primary:'#EF4444', secondary:'#F87171', accent:'#FCA5A5' }
+      };
+
+      window.renderColorThemeSelector = function () {
+        const selector = el('colorThemeSelector');
+        if (!selector) return;
+        selector.innerHTML = Object.keys(colorThemes).map(k => {
+          const t = colorThemes[k];
+          const border = window.currentTheme === k ? 'border:3px solid var(--primary);' : '';
+          return `
+            <div class="settings-card" onclick="applyTheme('${k}')" style="cursor:pointer; ${border}">
+              <h3 style="margin-bottom:15px;">${t.name}</h3>
+              <div style="display:flex;gap:10px;">
+                <div style="width:60px;height:60px;border-radius:12px;background:${t.primary};"></div>
+                <div style="width:60px;height:60px;border-radius:12px;background:${t.secondary};"></div>
+                <div style="width:60px;height:60px;border-radius:12px;background:${t.accent};"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      };
+
+      window.applyTheme = function (themeKey) {
+        if (!colorThemes[themeKey]) return;
+        window.currentTheme = themeKey;
+        const t = colorThemes[themeKey];
+        const root = document.documentElement;
+        root.style.setProperty('--primary', t.primary);
+        root.style.setProperty('--secondary', t.secondary);
+        root.style.setProperty('--accent', t.accent);
+        try { window.renderColorThemeSelector(); } catch (e) {}
+        window.saveToFirebase && window.saveToFirebase();
+      };
+
+      /* -------------------------
+         Firebase save/load and realtime
+         ------------------------- */
+      window.saveToFirebase = async function () {
+        if (!window.firebaseConfig || !window.firebaseConfig.configured || !window.firebaseDb) {
+          console.warn('skip saveToFirebase: Firebase not configured');
+          return;
         }
-
-        function calculateItemStats() {
-            const stats = {};
-            menuItems.forEach(item => {
-                stats[item.id] = 0;
-            });
-
-            orders.forEach(order => {
-                order.items.forEach(item => {
-                    stats[item.id] += item.quantity;
-                });
-            });
-
-            return stats;
+        const data = {
+          menuItems: window.menuItems,
+          orders: window.orders,
+          orderCounter: window.orderCounter,
+          maxInventory: window.maxInventory,
+          currentTheme: window.currentTheme,
+          siteName: window.siteName,
+          extraOptions: window.extraOptions,
+          nextItemId: window.nextItemId,
+          nextExtraOptionId: window.nextExtraOptionId,
+          lastUpdated: new Date().toISOString()
+        };
+        try {
+          await window.firebaseDb.ref('foodstand').set(data);
+          console.log('✅ Successfully saved to Firebase');
+          window.showSyncStatus && window.showSyncStatus('✅ 已同步到Firebase | Synced to Firebase','success');
+        } catch (err) {
+          console.error('Firebase save failed:', err);
+          window.showSyncStatus && window.showSyncStatus('❌ Firebase同步失敗 | Firebase sync failed','error');
         }
+      };
 
-        function renderStatistics() {
-            const statsGrid = document.getElementById('statisticsGrid');
-            const stats = calculateItemStats();
-
-            statsGrid.innerHTML = menuItems.map(item => {
-                const sold = stats[item.id];
-                const max = maxInventory[item.id];
-                const percentage = (sold / max) * 100;
-                let progressClass = '';
-
-                if (percentage >= 90) {
-                    progressClass = 'danger';
-                } else if (percentage >= 70) {
-                    progressClass = 'warning';
-                }
-
-                return `
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-emoji">${item.emoji}</div>
-                            <div>
-                                <div class="stat-name">${item.nameCh}</div>
-                                <div style="font-size: 0.85em; color: var(--text-muted);">${item.nameEn}</div>
-                            </div>
-                        </div>
-                        <div class="stat-numbers">
-                            <div class="stat-count">
-                                <div class="stat-label">已售出 | Sold</div>
-                                <div class="stat-value">${sold}</div>
-                            </div>
-                            <div style="font-size: 1.5em; color: var(--text-muted);">/</div>
-                            <div class="stat-count">
-                                <div class="stat-label">最大量 | Max</div>
-                                <div class="stat-max">${max}</div>
-                            </div>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill ${progressClass}" style="width: ${Math.min(percentage, 100)}%"></div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+      window.loadFromFirebase = async function () {
+        if (!window.firebaseConfig || !window.firebaseConfig.configured || !window.firebaseDb) {
+          console.warn('skip loadFromFirebase: Firebase not configured');
+          return;
         }
+        try {
+          const snapshot = await window.firebaseDb.ref('foodstand').once('value');
+          const data = snapshot.val();
+          if (!data) { console.log('No data in Firebase; using defaults and saving'); window.saveToFirebase && window.saveToFirebase(); return; }
+          if (Array.isArray(data.menuItems)) { window.menuItems.length=0; window.menuItems.push(...data.menuItems); }
+          if (Array.isArray(data.orders))  { window.orders.length=0; window.orders.push(...data.orders); }
+          window.orderCounter = data.orderCounter || window.orderCounter || 0;
+          if (data.maxInventory) Object.assign(window.maxInventory, data.maxInventory);
+          if (data.currentTheme) { window.currentTheme = data.currentTheme; window.applyTheme && window.applyTheme(window.currentTheme); }
+          if (data.siteName) Object.assign(window.siteName, data.siteName);
+          if (Array.isArray(data.extraOptions)) { window.extraOptions.length=0; window.extraOptions.push(...data.extraOptions); }
+          window.nextItemId = data.nextItemId || window.nextItemId;
+          window.nextExtraOptionId = data.nextExtraOptionId || window.nextExtraOptionId;
+          window.renderMenu(); window.updateCartDisplay(); window.updateSiteName && window.updateSiteName(); window.renderSettings && window.renderSettings(); window.renderStatistics && window.renderStatistics(); window.renderPendingOrders && window.renderPendingOrders(); window.renderCompletedOrders && window.renderCompletedOrders();
+          console.log('✅ Data loaded from Firebase');
+        } catch (err) { console.error('Firebase load failed:', err); }
+      };
 
-        function renderSettings() {
-            const settingsGrid = document.getElementById('settingsGrid');
-
-            settingsGrid.innerHTML = menuItems.map(item => `
-                <div class="settings-card">
-                    <div class="stat-header">
-                        <div class="stat-emoji">${item.emoji}</div>
-                        <div>
-                            <div class="stat-name">${item.nameCh}</div>
-                            <div style="font-size: 0.85em; color: var(--text-muted);">${item.nameEn}</div>
-                        </div>
-                    </div>
-                    <label style="font-size: 0.9em; color: var(--text-muted);">
-                        最大庫存量 | Max Inventory
-                    </label>
-                    <input type="number" class="settings-input" value="${maxInventory[item.id]}"
-                        onchange="updateMaxInventory(${item.id}, this.value)" min="0">
-                </div>
-            `).join('');
+      window.enableRealtimeSync = function () {
+        if (!window.firebaseConfig || !window.firebaseConfig.configured || !window.firebaseDb) {
+          console.error('Cannot enable real-time sync: Firebase not configured');
+          return;
         }
+        if (window.realtimeSyncEnabled) { console.log('Real-time sync already enabled'); return; }
+        console.log('🔄 Enabling real-time sync...');
+        window.firebaseDb.ref('foodstand').on('value', snapshot => {
+          try {
+            const data = snapshot.val();
+            if (!data) { console.log('No data in Firebase'); return; }
+            if (Array.isArray(data.menuItems)) { window.menuItems.length=0; window.menuItems.push(...data.menuItems); }
+            if (Array.isArray(data.orders))  { window.orders.length=0; window.orders.push(...data.orders); }
+            window.orderCounter = data.orderCounter || window.orderCounter || 0;
+            if (data.maxInventory) Object.assign(window.maxInventory, data.maxInventory);
+            if (data.currentTheme) window.currentTheme = data.currentTheme;
+            if (data.siteName) { Object.assign(window.siteName, data.siteName); window.updateSiteName && window.updateSiteName(); }
+            if (Array.isArray(data.extraOptions)) { window.extraOptions.length=0; window.extraOptions.push(...data.extraOptions); }
+            window.nextItemId = data.nextItemId || window.nextItemId;
+            window.nextExtraOptionId = data.nextExtraOptionId || window.nextExtraOptionId;
 
-        function updateMaxInventory(itemId, value) {
-            maxInventory[itemId] = parseInt(value) || 0;
-            renderStatistics();
-        }
-
-        function renderPendingOrders() {
-            const pendingGrid = document.getElementById('pendingOrdersGrid');
-            const emptyState = document.getElementById('emptyStatePending');
-
-            const pendingOrders = orders.filter(o => !o.completed);
-
-            if (pendingOrders.length === 0) {
-                pendingGrid.innerHTML = '';
-                emptyState.style.display = 'block';
-                return;
-            }
-
-            emptyState.style.display = 'none';
-
-            pendingGrid.innerHTML = pendingOrders.map(order => `
-                <div class="order-card">
-                    <div class="order-card-header">
-                        <div class="order-number-display">#${order.orderNumber}</div>
-                        <div class="order-time">
-                            ${new Date(order.timestamp).toLocaleTimeString('zh-TW', {
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            })}
-                        </div>
-                    </div>
-
-                    <div class="order-items">
-                        ${order.items.map(item => `
-                            <div class="order-item">
-                                ${item.emoji} ${item.nameCh} x${item.quantity}
-                                ${item.addDrink ? '<br>　　+ 飲料 (Drink)' : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-
-                    <div class="cart-total" style="font-size: 1.3em;">
-                        總計 Total: ${order.total} NTD
-                    </div>
-
-                    <button class="complete-btn" onclick="completeOrder(${order.orderNumber})">
-                        ✅ 完成訂單 | Complete Order
-                    </button>
-                </div>
-            `).join('');
-        }
-
-        function renderCompletedOrders() {
-            const completedGrid = document.getElementById('completedOrdersGrid');
-            const emptyState = document.getElementById('emptyStateCompleted');
-
-            const completedOrders = orders.filter(o => o.completed);
-
-            if (completedOrders.length === 0) {
-                completedGrid.innerHTML = '';
-                emptyState.style.display = 'block';
-                return;
-            }
-
-            emptyState.style.display = 'none';
-
-            completedGrid.innerHTML = completedOrders.map(order => `
-                <div class="order-card completed">
-                    <div class="order-card-header">
-                        <div class="order-number-display">#${order.orderNumber}</div>
-                        <div class="order-time">
-                            ${new Date(order.timestamp).toLocaleTimeString('zh-TW', {
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            })}
-                        </div>
-                    </div>
-
-                    <div class="order-items">
-                        ${order.items.map(item => `
-                            <div class="order-item">
-                                ${item.emoji} ${item.nameCh} x${item.quantity}
-                                ${item.addDrink ? '<br>　　+ 飲料 (Drink)' : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-
-                    <div class="cart-total" style="font-size: 1.3em;">
-                        總計 Total: ${order.total} NTD
-                    </div>
-
-                    <div class="completed-badge">✅ 已完成 Completed</div>
-                </div>
-            `).join('');
-        }
-
-        function completeOrder(orderNumber) {
-            const order = orders.find(o => o.orderNumber === orderNumber);
-            if (order) {
-                order.completed = true;
-                
-                // Update UI immediately (local)
-                renderPendingOrders();
-                renderCompletedOrders();
-                renderStatistics();
-                
-                // Sync to Firebase (will trigger real-time update on other devices)
-                saveToFirebase();
-            }
-        }
-
-        setInterval(() => {
-            const kitchenView = document.getElementById('kitchenView');
-            if (!kitchenView.classList.contains('hidden')) {
-                // Check which tab is active and only update that tab
-                const ordersTab = document.getElementById('ordersTab');
-                if (!ordersTab.classList.contains('hidden')) {
-                    renderPendingOrders();
-                    renderCompletedOrders();
-                }
-            }
-        }, 3000); // Check every 3 seconds for updates
-
-        function showKitchenTab(tab) {
-            const tabs = ['ordersTab', 'statisticsTab', 'settingsTab'];
-            const buttons = document.querySelectorAll('#kitchenView .view-toggle .toggle-btn');
-
-            tabs.forEach((t, index) => {
-                const element = document.getElementById(t);
-                if (t === tab + 'Tab') {
-                    element.classList.remove('hidden');
-                    buttons[index].classList.add('active');
-                } else {
-                    element.classList.add('hidden');
-                    buttons[index].classList.remove('active');
-                }
-            });
-
-            if (tab === 'settings') {
-                renderColorThemeSelector();
-                renderMenuManagement();
-                renderExtraOptionsManagement();
-                renderSettings();
-                loadFirebaseConfigFromMemory();
-                loadSiteNameToSettings();
-            }
-        }
-
-        function renderColorThemeSelector() {
-            const selector = document.getElementById('colorThemeSelector');
-            selector.innerHTML = Object.keys(colorThemes).map(themeKey => {
-                const theme = colorThemes[themeKey];
-                return `
-                    <div class="settings-card" onclick="applyTheme('${themeKey}')" style="cursor: pointer; ${currentTheme === themeKey ? 'border: 3px solid var(--primary);' : ''}">
-                        <h3 style="margin-bottom: 15px;">${theme.name}</h3>
-                        <div style="display: flex; gap: 10px;">
-                            <div style="width: 60px; height: 60px; border-radius: 12px; background: ${theme.primary};"></div>
-                            <div style="width: 60px; height: 60px; border-radius: 12px; background: ${theme.secondary};"></div>
-                            <div style="width: 60px; height: 60px; border-radius: 12px; background: ${theme.accent};"></div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function applyTheme(themeKey) {
-            currentTheme = themeKey;
-            const theme = colorThemes[themeKey];
-            const root = document.documentElement;
-
-            root.style.setProperty('--primary', theme.primary);
-            root.style.setProperty('--secondary', theme.secondary);
-            root.style.setProperty('--accent', theme.accent);
-
-            renderColorThemeSelector();
-            saveToFirebase();
-        }
-
-        function renderMenuManagement() {
-            const grid = document.getElementById('menuManagementGrid');
-            grid.innerHTML = menuItems.map(item => `
-                <div class="settings-card">
-                    <div class="stat-header">
-                        <div class="stat-emoji">${item.emoji}</div>
-                        <div>
-                            <div class="stat-name">${item.nameCh}</div>
-                            <div style="font-size: 0.85em; color: var(--text-muted);">${item.nameEn}</div>
-                        </div>
-                    </div>
-                    <div style="margin-top: 15px;">
-                        <div style="font-size: 1.3em; color: var(--secondary); font-weight: 700;">${item.price} NTD</div>
-                    </div>
-                    <div style="margin-top: 15px; display: flex; gap: 10px;">
-                        <button class="complete-btn" onclick="editItem(${item.id})" style="flex: 1; background: var(--secondary);">
-                            ✏️ 編輯 | Edit
-                        </button>
-                        <button class="complete-btn" onclick="deleteItem(${item.id})" style="flex: 1; background: var(--danger);">
-                            🗑️ 刪除 | Delete
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function showAddItemModal() {
-            document.getElementById('itemModalTitle').textContent = '➕ 新增菜單項目 | Add Menu Item';
-            document.getElementById('editItemId').value = '';
-            document.getElementById('itemEmoji').value = '';
-            document.getElementById('itemNameCh').value = '';
-            document.getElementById('itemNameEn').value = '';
-            document.getElementById('itemPrice').value = '';
-            document.getElementById('itemMaxInventory').value = '50';
-            document.getElementById('itemModal').classList.add('show');
-        }
-
-        function editItem(itemId) {
-            const item = menuItems.find(i => i.id === itemId);
-            if (!item) return;
-
-            document.getElementById('itemModalTitle').textContent = '✏️ 編輯菜單項目 | Edit Menu Item';
-            document.getElementById('editItemId').value = item.id;
-            document.getElementById('itemEmoji').value = item.emoji;
-            document.getElementById('itemNameCh').value = item.nameCh;
-            document.getElementById('itemNameEn').value = item.nameEn;
-            document.getElementById('itemPrice').value = item.price;
-            document.getElementById('itemMaxInventory').value = maxInventory[item.id] || 50;
-            document.getElementById('itemModal').classList.add('show');
-        }
-
-        function saveItem() {
-            const editId = document.getElementById('editItemId').value;
-            const emoji = document.getElementById('itemEmoji').value.trim();
-            const nameCh = document.getElementById('itemNameCh').value.trim();
-            const nameEn = document.getElementById('itemNameEn').value.trim();
-            const price = parseInt(document.getElementById('itemPrice').value) || 0;
-            const maxInv = parseInt(document.getElementById('itemMaxInventory').value) || 50;
-
-            if (!emoji || !nameCh || !nameEn || price <= 0) {
-                showSyncStatus('請填寫所有欄位 | Please fill all fields', 'error');
-                return;
-            }
-
-            if (editId) {
-                const item = menuItems.find(i => i.id === parseInt(editId));
-                if (item) {
-                    item.emoji = emoji;
-                    item.nameCh = nameCh;
-                    item.nameEn = nameEn;
-                    item.price = price;
-                    maxInventory[item.id] = maxInv;
-                }
-            } else {
-                const newItem = {
-                    id: nextItemId++,
-                    emoji,
-                    nameCh,
-                    nameEn,
-                    price,
-                    canAddDrink: true
-                };
-                menuItems.push(newItem);
-                maxInventory[newItem.id] = maxInv;
-            }
-
-            closeItemModal();
-            renderMenu();
-            renderMenuManagement();
-            renderSettings();
-            renderStatistics();
-            saveToFirebase();
-        }
-
-        function deleteItem(itemId) {
-            showConfirmDialog(
-                '確定要刪除此項目嗎？| Are you sure you want to delete this item?',
-                () => {
-                    const index = menuItems.findIndex(i => i.id === itemId);
-                    if (index !== -1) {
-                        menuItems.splice(index, 1);
-                        delete maxInventory[itemId];
-                        renderMenu();
-                        renderMenuManagement();
-                        renderStatistics();
-                        saveToFirebase();
-                    }
-                }
-            );
-        }
-
-        function closeItemModal() {
-            document.getElementById('itemModal').classList.remove('show');
-        }
-
-        function renderExtraOptionsManagement() {
-            const grid = document.getElementById('extraOptionsGrid');
-            grid.innerHTML = extraOptions.map(option => `
-                <div class="settings-card">
-                    <div>
-                        <div class="stat-name">${option.nameCh}</div>
-                        <div style="font-size: 0.85em; color: var(--text-muted);">${option.nameEn}</div>
-                    </div>
-                    <div style="margin-top: 15px;">
-                        <div style="font-size: 1.3em; color: var(--secondary); font-weight: 700;">+${option.price} NTD</div>
-                    </div>
-                    <div style="margin-top: 15px; display: flex; gap: 10px;">
-                        <button class="complete-btn" onclick="editExtraOption(${option.id})" style="flex: 1; background: var(--secondary);">
-                            ✏️ 編輯 | Edit
-                        </button>
-                        <button class="complete-btn" onclick="deleteExtraOption(${option.id})" style="flex: 1; background: var(--danger);">
-                            🗑️ 刪除 | Delete
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function showAddExtraOptionModal() {
-            document.getElementById('extraOptionModalTitle').textContent = '➕ 新增額外選項 | Add Extra Option';
-            document.getElementById('editExtraOptionId').value = '';
-            document.getElementById('extraOptionNameCh').value = '';
-            document.getElementById('extraOptionNameEn').value = '';
-            document.getElementById('extraOptionPrice').value = '';
-            document.getElementById('extraOptionModal').classList.add('show');
-        }
-
-        function editExtraOption(optionId) {
-            const option = extraOptions.find(o => o.id === optionId);
-            if (!option) return;
-
-            document.getElementById('extraOptionModalTitle').textContent = '✏️ 編輯額外選項 | Edit Extra Option';
-            document.getElementById('editExtraOptionId').value = option.id;
-            document.getElementById('extraOptionNameCh').value = option.nameCh;
-            document.getElementById('extraOptionNameEn').value = option.nameEn;
-            document.getElementById('extraOptionPrice').value = option.price;
-            document.getElementById('extraOptionModal').classList.add('show');
-        }
-
-        function saveExtraOption() {
-            const editId = document.getElementById('editExtraOptionId').value;
-            const nameCh = document.getElementById('extraOptionNameCh').value.trim();
-            const nameEn = document.getElementById('extraOptionNameEn').value.trim();
-            const price = parseInt(document.getElementById('extraOptionPrice').value) || 0;
-
-            if (!nameCh || !nameEn || price <= 0) {
-                showSyncStatus('請填寫所有欄位 | Please fill all fields', 'error');
-                return;
-            }
-
-            if (editId) {
-                const option = extraOptions.find(o => o.id === parseInt(editId));
-                if (option) {
-                    option.nameCh = nameCh;
-                    option.nameEn = nameEn;
-                    option.price = price;
-                }
-            } else {
-                extraOptions.push({
-                    id: nextExtraOptionId++,
-                    nameCh,
-                    nameEn,
-                    price
-                });
-            }
-
-            closeExtraOptionModal();
-            renderExtraOptionsManagement();
-            saveToFirebase();
-        }
-
-        function deleteExtraOption(optionId) {
-            showConfirmDialog(
-                '確定要刪除此選項嗎？| Are you sure you want to delete this option?',
-                () => {
-                    const index = extraOptions.findIndex(o => o.id === optionId);
-                    if (index !== -1) {
-                        extraOptions.splice(index, 1);
-                        renderExtraOptionsManagement();
-                        saveToFirebase();
-                    }
-                }
-            );
-        }
-
-        function closeExtraOptionModal() {
-            document.getElementById('extraOptionModal').classList.remove('show');
-        }
-
-        function showConfirmDialog(message, onConfirm) {
-            const modal = document.createElement('div');
-            modal.className = 'modal show';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <p style="font-size: 1.1em; margin-bottom: 20px;">${message}</p>
-                    <div style="display: flex; gap: 10px; justify-content: center;">
-                        <button class="modal-close" style="background: var(--text-muted);" onclick="this.closest('.modal').remove()">
-                            取消 | Cancel
-                        </button>
-                        <button class="modal-close" onclick="this.closest('.modal').remove(); (${onConfirm})()">
-                            確認 | Confirm
-                        </button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-
-            modal.querySelector('button:last-child').onclick = () => {
-                modal.remove();
-                onConfirm();
-            };
-        }
-
-        function showSyncStatus(message, type = 'success') {
-            const statusDiv = document.getElementById('syncStatus');
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = type === 'success' ? 'var(--success)' : 'var(--danger)';
-            statusDiv.style.color = 'white';
-            statusDiv.textContent = message;
-
-            setTimeout(() => {
-                statusDiv.style.display = 'none';
-            }, 3000);
-        }
-
-        function autoInitializeFirebase() {
-            if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
-                console.log('🔥 Firebase config found, auto-initializing...');
-                initializeFirebase();
-            } else {
-                console.log('ℹ️ No Firebase config found. Configure in Kitchen Settings.');
-            }
-        }
-
-        function loadFirebaseConfigFromMemory() {
-            if (document.getElementById('apiKeyInput')) {
-                document.getElementById('apiKeyInput').value = firebaseConfig.apiKey || '';
-                document.getElementById('authDomainInput').value = firebaseConfig.authDomain || '';
-                document.getElementById('databaseURLInput').value = firebaseConfig.databaseURL || '';
-                document.getElementById('projectIdInput').value = firebaseConfig.projectId || '';
-                document.getElementById('storageBucketInput').value = firebaseConfig.storageBucket || '';
-                document.getElementById('messagingSenderIdInput').value = firebaseConfig.messagingSenderId || '';
-                document.getElementById('appIdInput').value = firebaseConfig.appId || '';
-            }
-        }
-
-        function saveFirebaseConfig() {
-            firebaseConfig.apiKey = document.getElementById('apiKeyInput').value.trim();
-            firebaseConfig.authDomain = document.getElementById('authDomainInput').value.trim();
-            firebaseConfig.databaseURL = document.getElementById('databaseURLInput').value.trim();
-            firebaseConfig.projectId = document.getElementById('projectIdInput').value.trim();
-            firebaseConfig.storageBucket = document.getElementById('storageBucketInput').value.trim();
-            firebaseConfig.messagingSenderId = document.getElementById('messagingSenderIdInput').value.trim();
-            firebaseConfig.appId = document.getElementById('appIdInput').value.trim();
-
-            if (firebaseConfig.apiKey && firebaseConfig.databaseURL) {
-                initializeFirebase();
-                showSyncStatus('Firebase設定已儲存 | Firebase config saved', 'success');
-            } else {
-                showSyncStatus('請填寫必要欄位 | Please fill required fields', 'error');
-            }
-        }
-
-        function initializeFirebase() {
-            if (firebaseConfig.configured) {
-                console.log('⚠️ Firebase already configured, skipping...');
-                return;
-            }
-
+            // Re-render parts
             try {
-                if (!window.firebase) {
-                    console.error('❌ Firebase SDK not loaded');
-                    return;
-                }
+              window.renderMenu(); window.updateCartDisplay();
+              const kitchenView = el('kitchenView');
+              if (kitchenView && !kitchenView.classList.contains('hidden')) {
+                const ordersTab = el('ordersTab'), statisticsTab = el('statisticsTab'), settingsTab = el('settingsTab');
+                if (ordersTab && !ordersTab.classList.contains('hidden')) { window.renderPendingOrders(); window.renderCompletedOrders(); }
+                else if (statisticsTab && !statisticsTab.classList.contains('hidden')) { window.renderStatistics(); }
+                else if (settingsTab && !settingsTab.classList.contains('hidden')) { window.renderColorThemeSelector(); window.renderMenuManagement(); window.renderExtraOptionsManagement(); window.renderSettings(); window.loadSiteNameToSettings(); }
+              }
+              console.log('✅ UI updated from realtime data');
+            } catch (renderErr) { console.error('UI render error after realtime update:', renderErr); }
+          } catch (err) { console.error('Realtime on value error:', err); }
+        }, err => { console.error('Firebase listener error:', err); });
+        window.realtimeSyncEnabled = true;
+        console.log('✅ Real-time sync enabled');
+        const syncStatus = el('syncStatus'); if (syncStatus) { syncStatus.style.display='block'; syncStatus.style.background='var(--success)'; syncStatus.style.color='white'; syncStatus.innerText='🔄 即時訂單同步已啟用 | Real-time orders sync enabled'; setTimeout(()=>{ syncStatus.style.display='none'; },3000); }
+      };
 
-                console.log('🔧 Initializing Firebase...');
-                firebase.initializeApp(firebaseConfig);
-                firebaseDb = firebase.database();
-                firebaseConfig.configured = true;
+      /* -------------------------
+         Admin utilities
+         ------------------------- */
+      window.clearCompletedOrders = function () {
+        window.showConfirmDialog('確定要清除所有已完成訂單嗎？此操作無法復原。<br>Are you sure you want to clear all completed orders? This cannot be undone.', () => {
+          window.orders = window.orders.filter(o=>!o.completed);
+          window.renderPendingOrders(); window.renderCompletedOrders(); window.renderStatistics(); window.saveToFirebase && window.saveToFirebase();
+          window.showSyncStatus && window.showSyncStatus('✅ 已完成訂單已清除 | Completed orders cleared','success');
+        });
+      };
 
-                console.log('✅ Firebase initialized successfully!');
-                console.log('📡 Database reference:', firebaseDb);
+      window.resetAllOrders = function () {
+        window.showConfirmDialog('⚠️ 確定要重置所有訂單嗎？這會刪除所有待處理和已完成的訂單！此操作無法復原。<br>Are you sure you want to reset ALL orders? This will delete all pending and completed orders! This cannot be undone.', () => {
+          window.orders = [];
+          window.renderPendingOrders(); window.renderCompletedOrders(); window.renderStatistics(); window.saveToFirebase && window.saveToFirebase();
+          window.showSyncStatus && window.showSyncStatus('✅ 所有訂單已重置 | All orders reset','success');
+        });
+      };
 
-                // Auto-load data on init
-                loadFromFirebase();
+      window.resetOrderCounter = function () {
+        window.showConfirmDialog('確定要重置訂單編號計數器嗎？下一個訂單將從 #1 開始。<br>Are you sure you want to reset the order counter? Next order will start from #1.', () => {
+          window.orderCounter = 0; window.saveToFirebase && window.saveToFirebase(); window.showSyncStatus && window.showSyncStatus('✅ 訂單編號已重置 | Order counter reset','success');
+        });
+      };
 
-                // Enable real-time sync automatically
-                console.log('🔄 Starting real-time sync...');
-                enableRealtimeSync();
-
-                showSyncStatus('✅ Firebase已連接並啟用即時同步 | Firebase connected with real-time sync', 'success');
-            } catch (error) {
-                console.error('❌ Firebase init failed:', error);
-                showSyncStatus('Firebase初始化失敗 | Firebase init failed: ' + error.message, 'error');
-            }
+      /* -------------------------
+         Kitchen view helpers and tabs
+         ------------------------- */
+      window.switchView = function (view) {
+        const customerView = el('customerView'), kitchenView = el('kitchenView'), buttons = document.querySelectorAll('.toggle-btn');
+        if (view === 'customer') {
+          if (customerView) customerView.classList.remove('hidden');
+          if (kitchenView) kitchenView.classList.add('hidden');
+          if (buttons[0]) buttons[0].classList.add('active');
+          if (buttons[1]) buttons[1].classList.remove('active');
+        } else {
+          if (!window.isKitchenAuthenticated) {
+            if (el('passwordModal')) { el('passwordModal').classList.add('show'); if (el('passwordInput')) { el('passwordInput').value=''; el('passwordInput').focus(); } }
+            return;
+          }
+          if (customerView) customerView.classList.add('hidden');
+          if (kitchenView) kitchenView.classList.remove('hidden');
+          if (buttons[0]) buttons[0].classList.remove('active');
+          if (buttons[1]) buttons[1].classList.add('active');
+          window.renderKitchenView && window.renderKitchenView();
         }
+      };
 
-        async function saveToFirebase() {
-            if (!firebaseConfig.configured || !firebaseDb) {
-                console.error('⚠️ Cannot save to Firebase: Not configured');
-                return;
-            }
-
-            const data = {
-                menuItems,
-                orders,
-                orderCounter,
-                maxInventory,
-                currentTheme,
-                siteName,
-                extraOptions,
-                nextItemId,
-                nextExtraOptionId,
-                lastUpdated: new Date().toISOString()
-            };
-
-            console.log('💾 Saving to Firebase...', {
-                orderCount: orders.length,
-                orderCounter: orderCounter
-            });
-
-            try {
-                await firebaseDb.ref('foodstand').set(data);
-                console.log('✅ Successfully saved to Firebase');
-                showSyncStatus('✅ 已同步到Firebase | Synced to Firebase', 'success');
-            } catch (error) {
-                console.error('❌ Firebase save failed:', error);
-                showSyncStatus('❌ Firebase同步失敗 | Firebase sync failed: ' + error.message, 'error');
-            }
+      window.verifyPassword = function () {
+        if (!el('passwordInput')) return;
+        const val = el('passwordInput').value || '';
+        const err = el('passwordError');
+        if (val === window.KITCHEN_PASSWORD) {
+          window.isKitchenAuthenticated = true;
+          if (el('passwordModal')) el('passwordModal').classList.remove('show');
+          window.switchView('kitchen');
+        } else {
+          if (err) err.style.display = 'block';
+          el('passwordInput').value = '';
+          el('passwordInput').focus();
         }
+      };
 
-        async function loadFromFirebase() {
-            if (!firebaseConfig.configured || !firebaseDb) {
-                console.log('Firebase not configured, skipping load');
-                return;
-            }
+      window.closePasswordModal = function () { if (el('passwordModal')) el('passwordModal').classList.remove('show'); if (!window.isKitchenAuthenticated) { const btns = document.querySelectorAll('.toggle-btn'); if (btns[0]) btns[0].classList.add('active'); if (btns[1]) btns[1].classList.remove('active'); } };
 
-            try {
-                const snapshot = await firebaseDb.ref('foodstand').once('value');
-                const data = snapshot.val();
+      window.renderKitchenView = function () { window.renderStatistics && window.renderStatistics(); window.renderSettings && window.renderSettings(); window.renderPendingOrders && window.renderPendingOrders(); window.renderCompletedOrders && window.renderCompletedOrders(); };
 
-                if (!data) {
-                    console.log('No data in Firebase yet, will use defaults');
-                    saveToFirebase();
-                    return;
-                }
+      /* -------------------------
+         Small DOM-ready initialization
+         ------------------------- */
+      document.addEventListener('DOMContentLoaded', function () {
+        // wire Enter key for password input
+        const pi = el('passwordInput');
+        if (pi) pi.addEventListener('keypress', (e) => { if (e.key === 'Enter') window.verifyPassword(); });
 
-                if (data.menuItems && Array.isArray(data.menuItems)) {
-                    menuItems.length = 0;
-                    menuItems.push(...data.menuItems);
-                }
+        // initial render
+        window.renderMenu(); window.updateCartDisplay(); window.updateSiteName && window.updateSiteName(); window.loadSiteNameToSettings && window.loadSiteNameToSettings(); window.renderColorThemeSelector && window.renderColorThemeSelector();
 
-                if (data.orders && Array.isArray(data.orders)) {
-                    orders.length = 0;
-                    orders.push(...data.orders);
-                }
+        // try safe firebase init shortly after load (in case user filled config before)
+        setTimeout(() => {
+          if (window.initializeFirebaseSafe && window.initializeFirebaseSafe()) {
+            // if initialized, load data and enable realtime
+            window.loadFromFirebase && window.loadFromFirebase();
+            window.enableRealtimeSync && window.enableRealtimeSync();
+          } else {
+            console.log('Firebase not auto-initialized (waiting for user configure).');
+          }
+        }, 250);
+      });
 
-                orderCounter = data.orderCounter || 0;
+      // Expose some functions for live-sync.js compatibility
+      window.renderKitchenOrders = function () { window.renderPendingOrders && window.renderPendingOrders(); window.renderCompletedOrders && window.renderCompletedOrders(); window.renderStatistics && window.renderStatistics(); };
 
-                if (data.maxInventory) {
-                    Object.assign(maxInventory, data.maxInventory);
-                }
-
-                if (data.currentTheme) {
-                    currentTheme = data.currentTheme;
-                    applyTheme(currentTheme);
-                }
-
-                if (data.siteName) {
-                    Object.assign(siteName, data.siteName);
-                    updateSiteName();
-                }
-
-                if (data.extraOptions && Array.isArray(data.extraOptions)) {
-                    extraOptions.length = 0;
-                    extraOptions.push(...data.extraOptions);
-                }
-
-                nextItemId = data.nextItemId || 5;
-                nextExtraOptionId = data.nextExtraOptionId || 2;
-
-                renderMenu();
-                updateCartDisplay();
-
-                console.log('✅ Data loaded from Firebase');
-            } catch (error) {
-                console.error('Firebase load failed:', error);
-            }
-        }
-
-        let realtimeSyncEnabled = false;
-
-        function enableRealtimeSync() {
-            if (!firebaseConfig.configured || !firebaseDb) {
-                console.error('Cannot enable real-time sync: Firebase not configured');
-                return;
-            }
-
-            if (realtimeSyncEnabled) {
-                console.log('Real-time sync already enabled');
-                return;
-            }
-
-            console.log('🔄 Enabling real-time sync...');
-
-            firebaseDb.ref('foodstand').on('value', (snapshot) => {
-                try {
-                    const data = snapshot.val();
-
-                    if (!data) {
-                        console.log('No data in Firebase');
-                        return;
-                    }
-
-                    console.log('📥 Receiving data from Firebase...', data);
-
-                    if (data.menuItems && Array.isArray(data.menuItems)) {
-                        menuItems.length = 0;
-                        menuItems.push(...data.menuItems);
-                        console.log('Menu items updated:', menuItems.length);
-                    }
-
-                    if (data.orders && Array.isArray(data.orders)) {
-                        const oldOrderCount = orders.length;
-                        orders.length = 0;
-                        orders.push(...data.orders);
-                        console.log(`Orders updated: ${oldOrderCount} → ${orders.length}`);
-                    }
-
-                    orderCounter = data.orderCounter || 0;
-
-                    if (data.maxInventory) {
-                        Object.assign(maxInventory, data.maxInventory);
-                    }
-
-                    if (data.currentTheme) {
-                        currentTheme = data.currentTheme;
-                    }
-
-                    if (data.siteName) {
-                        Object.assign(siteName, data.siteName);
-                        updateSiteName();
-                    }
-
-                    if (data.extraOptions && Array.isArray(data.extraOptions)) {
-                        extraOptions.length = 0;
-                        extraOptions.push(...data.extraOptions);
-                    }
-
-                    nextItemId = data.nextItemId || 5;
-                    nextExtraOptionId = data.nextExtraOptionId || 2;
-
-                    try {
-                        renderMenu();
-                        updateCartDisplay();
-
-                        const kitchenView = document.getElementById('kitchenView');
-                        if (kitchenView && !kitchenView.classList.contains('hidden')) {
-                            console.log('🔄 Updating kitchen view...');
-                            
-                            // Check which tab is currently active
-                            const ordersTab = document.getElementById('ordersTab');
-                            const statisticsTab = document.getElementById('statisticsTab');
-                            const settingsTab = document.getElementById('settingsTab');
-                            
-                            if (!ordersTab.classList.contains('hidden')) {
-                                // Orders tab is active
-                                renderPendingOrders();
-                                renderCompletedOrders();
-                            } else if (!statisticsTab.classList.contains('hidden')) {
-                                // Statistics tab is active
-                                renderStatistics();
-                            } else if (!settingsTab.classList.contains('hidden')) {
-                                // Settings tab is active - update all settings views
-                                renderColorThemeSelector();
-                                renderMenuManagement();
-                                renderExtraOptionsManagement();
-                                renderSettings();
-                                loadSiteNameToSettings();
-                            }
-                        }
-
-                        console.log('✅ UI updated successfully');
-                    } catch (renderError) {
-                        console.error('Render error:', renderError);
-                    }
-                } catch (error) {
-                    console.error('Real-time sync error:', error);
-                }
-            }, (error) => {
-                console.error('Firebase listener error:', error);
-            });
-
-            realtimeSyncEnabled = true;
-            console.log('✅ Real-time sync enabled');
-        }
-
-        function clearCompletedOrders() {
-            showConfirmDialog(
-                '確定要清除所有已完成訂單嗎？此操作無法復原。<br>Are you sure you want to clear all completed orders? This cannot be undone.',
-                () => {
-                    orders = orders.filter(order => !order.completed);
-                    
-                    // Update UI immediately
-                    renderPendingOrders();
-                    renderCompletedOrders();
-                    renderStatistics();
-                    
-                    // Then sync to Firebase
-                    saveToFirebase();
-                    showSyncStatus('✅ 已完成訂單已清除 | Completed orders cleared', 'success');
-                }
-            );
-        }
-
-        function resetAllOrders() {
-            showConfirmDialog(
-                '⚠️ 確定要重置所有訂單嗎？這會刪除所有待處理和已完成的訂單！此操作無法復原。<br>Are you sure you want to reset ALL orders? This will delete all pending and completed orders! This cannot be undone.',
-                () => {
-                    orders = [];
-                    
-                    // Update UI immediately
-                    renderPendingOrders();
-                    renderCompletedOrders();
-                    renderStatistics();
-                    
-                    // Then sync to Firebase
-                    saveToFirebase();
-                    showSyncStatus('✅ 所有訂單已重置 | All orders reset', 'success');
-                }
-            );
-        }
-
-        function resetOrderCounter() {
-            showConfirmDialog(
-                '確定要重置訂單編號計數器嗎？下一個訂單將從 #1 開始。<br>Are you sure you want to reset the order counter? Next order will start from #1.',
-                () => {
-                    orderCounter = 0;
-                    saveToFirebase();
-                    showSyncStatus('✅ 訂單編號已重置 | Order counter reset', 'success');
-                }
-            );
-        }
+    })();
     </script>
-    
+
     <!-- Load live-sync.js for real-time order updates -->
     <script src="live-sync.js"></script>
 </body>
