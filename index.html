@@ -921,126 +921,6 @@
 </div>
 
 <script>
-let firebaseApp;
-let db;
-let realtimeSyncEnabled = false;
-
-function saveFirebaseConfig() {
-    const config = {
-        apiKey: document.getElementById("apiKeyInput").value,
-        authDomain: document.getElementById("authDomainInput").value,
-        databaseURL: document.getElementById("databaseURLInput").value,
-        projectId: document.getElementById("projectIdInput").value,
-        storageBucket: document.getElementById("storageBucketInput").value,
-        messagingSenderId: document.getElementById("messagingSenderIdInput").value,
-        appId: document.getElementById("appIdInput").value,
-    };
-
-    try {
-        firebaseApp = firebase.initializeApp(config);
-        db = firebase.database();
-        console.log("Firebase initialized successfully!");
-        document.getElementById("syncStatus").style.display = "block";
-        document.getElementById("syncStatus").innerText = "✅ Firebase connected";
-    } catch (err) {
-        console.error("Firebase init failed:", err);
-        document.getElementById("syncStatus").style.display = "block";
-        document.getElementById("syncStatus").innerText = "❌ Firebase init failed";
-    }
-}
-
-function enableRealtimeSync() {
-    if (!db) {
-        console.error("Firebase not initialized");
-        return;
-    }
-
-    realtimeSyncEnabled = true;
-    listenForOrders();
-    document.getElementById("syncStatus").innerText = "🔄 Real-time sync enabled";
-}
-
-function listenForOrders() {
-    if (!realtimeSyncEnabled) return;
-
-    db.ref("orders/pending").on("value", snapshot => {
-        const orders = snapshot.val() || {};
-        renderPendingOrders(orders);
-    });
-
-    db.ref("orders/completed").on("value", snapshot => {
-        const orders = snapshot.val() || {};
-        renderCompletedOrders(orders);
-    });
-}
-
-function renderPendingOrders(orders) {
-    const grid = document.getElementById("pendingOrdersGrid");
-    const emptyState = document.getElementById("emptyStatePending");
-    grid.innerHTML = "";
-
-    const entries = Object.entries(orders);
-    if (entries.length === 0) {
-        emptyState.style.display = "block";
-        return;
-    }
-
-    emptyState.style.display = "none";
-    entries.forEach(([id, order]) => {
-        grid.innerHTML += `
-            <div class="order-card">
-                <div class="order-card-header">
-                    <div class="order-number-display">#${order.number}</div>
-                    <div class="order-time">${order.time}</div>
-                </div>
-                <div class="order-items">
-                    ${order.items.map(i => `<div class="order-item">${i}</div>`).join("")}
-                </div>
-                <button class="complete-btn" onclick="markOrderCompleted('${id}')">完成 | Complete</button>
-            </div>
-        `;
-    });
-}
-
-function renderCompletedOrders(orders) {
-    const grid = document.getElementById("completedOrdersGrid");
-    const emptyState = document.getElementById("emptyStateCompleted");
-    grid.innerHTML = "";
-
-    const entries = Object.entries(orders);
-    if (entries.length === 0) {
-        emptyState.style.display = "block";
-        return;
-    }
-
-    emptyState.style.display = "none";
-    entries.forEach(([id, order]) => {
-        grid.innerHTML += `
-            <div class="order-card completed">
-                <div class="order-card-header">
-                    <div class="order-number-display">#${order.number}</div>
-                    <div class="order-time">${order.time}</div>
-                </div>
-                <div class="order-items">
-                    ${order.items.map(i => `<div class="order-item">${i}</div>`).join("")}
-                </div>
-                <div class="completed-badge">✅ Completed</div>
-            </div>
-        `;
-    });
-}
-
-function markOrderCompleted(orderId) {
-    const orderRef = db.ref(`orders/pending/${orderId}`);
-    orderRef.once("value").then(snapshot => {
-        const orderData = snapshot.val();
-        if (orderData) {
-            db.ref(`orders/completed/${orderId}`).set(orderData);
-            orderRef.remove();
-        }
-    });
-}
-
     // Menu items data
     const menuItems = [
         {
@@ -2207,6 +2087,104 @@ function markOrderCompleted(orderId) {
     }
 </script>
 ```
+<script>
+let firebaseApp = null;
+let db = null;
+let realtimeSyncEnabled = false;
+
+function saveFirebaseConfig() {
+    const config = {
+        apiKey: document.getElementById("apiKeyInput").value,
+        authDomain: document.getElementById("authDomainInput").value,
+        databaseURL: document.getElementById("databaseURLInput").value,
+        projectId: document.getElementById("projectIdInput").value,
+        storageBucket: document.getElementById("storageBucketInput").value,
+        messagingSenderId: document.getElementById("messagingSenderIdInput").value,
+        appId: document.getElementById("appIdInput").value,
+    };
+
+    try {
+        if (!firebase.apps.length) {
+            firebaseApp = firebase.initializeApp(config);
+            db = firebase.database();
+            console.log("✅ Firebase initialized");
+            document.getElementById("syncStatus").style.display = "block";
+            document.getElementById("syncStatus").innerText = "✅ Firebase connected";
+        }
+    } catch (err) {
+        console.error("❌ Firebase init failed:", err);
+        document.getElementById("syncStatus").style.display = "block";
+        document.getElementById("syncStatus").innerText = "❌ Firebase init failed";
+    }
+}
+
+function enableRealtimeSync() {
+    if (!db) {
+        console.error("❌ Firebase not initialized");
+        return;
+    }
+
+    if (realtimeSyncEnabled) return;
+    realtimeSyncEnabled = true;
+
+    document.getElementById("syncStatus").innerText = "🔄 Real-time sync enabled";
+    listenForOrders();
+}
+
+function listenForOrders() {
+    db.ref("orders/pending").on("value", snapshot => {
+        const orders = snapshot.val() || {};
+        renderOrders("pendingOrdersGrid", "emptyStatePending", orders, true);
+    });
+
+    db.ref("orders/completed").on("value", snapshot => {
+        const orders = snapshot.val() || {};
+        renderOrders("completedOrdersGrid", "emptyStateCompleted", orders, false);
+    });
+}
+
+function renderOrders(gridId, emptyId, orders, isPending) {
+    const grid = document.getElementById(gridId);
+    const emptyState = document.getElementById(emptyId);
+    grid.innerHTML = "";
+
+    const entries = Object.entries(orders);
+    if (entries.length === 0) {
+        emptyState.style.display = "block";
+        return;
+    }
+
+    emptyState.style.display = "none";
+    entries.forEach(([id, order]) => {
+        const itemsHtml = order.items.map(i => `<div class="order-item">${i}</div>`).join("");
+        const completeBtn = isPending
+            ? `<button class="complete-btn" onclick="markOrderCompleted('${id}')">完成 | Complete</button>`
+            : `<div class="completed-badge">✅ Completed</div>`;
+
+        grid.innerHTML += `
+            <div class="order-card ${isPending ? "" : "completed"}">
+                <div class="order-card-header">
+                    <div class="order-number-display">#${order.number}</div>
+                    <div class="order-time">${order.time}</div>
+                </div>
+                <div class="order-items">${itemsHtml}</div>
+                ${completeBtn}
+            </div>
+        `;
+    });
+}
+
+function markOrderCompleted(orderId) {
+    const ref = db.ref(`orders/pending/${orderId}`);
+    ref.once("value").then(snapshot => {
+        const data = snapshot.val();
+        if (data) {
+            db.ref(`orders/completed/${orderId}`).set(data);
+            ref.remove();
+        }
+    });
+}
+</script>
 
 </body>
 </html>
