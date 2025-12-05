@@ -19,7 +19,7 @@
     window.maxInventory = window.maxInventory || { 1: 50, 2: 50, 3: 30, 4: 100 };
     window.currentTheme = window.currentTheme || 'orange';
     window.siteName = window.siteName || { chinese: '美食站', english: 'Food Stand', emoji: '🍴' };
-    window.extraOptions = window.extraOptions || [{ id: 1, nameCh: '加購飲料', nameEn: 'Add Drink', price: 15 }];
+    window.extraOptions = window.extraOptions || [{ id: 1, nameCh: '加購飲料', nameEn: 'Add Drink', price: 20 }];
     window.nextItemId = window.nextItemId || 5;
     window.nextExtraOptionId = window.nextExtraOptionId || 2;
   
